@@ -9,3 +9,5 @@ langdetect
 tqdm
 huggingface_hub
 transformers
+ipywidgets
+pytest

@@ -66,13 +66,104 @@ cd <repository-name>
 ### 4.2 Create Virtual Environment (Recommended)
 ```bash
 python -m venv ML-code-prediction
-source venv/bin/activate        # macOS/Linux
+source ML-code-prediction/bin/activate      # macOS/Linux
 venv\Scripts\activate           # Windows
 ```
 
 ### 4.3 Install Dependencies
 ```bash
-pip install -r requirements.txt
+pip install -r requirement.txt
 ```
+
+---
+
+## Streaming Data Loader Interface
+This module provides a unified interface for loading and inspecting the **SwitchLingua streaming dataset** used for next-token code-switch prediction.
+
+It converts sequence-level preprocessed data into **window-level training samples**.
+
+### Task Definition
+
+Given a prefix window ending at position **t**: `[x(t-N+1) … x(t)]`
+
+The model predicts:
+
+- `ysw[t]` → whether the next token (t+1) switches language  
+- `ydur[t]` → the duration class of the upcoming language segment
+
+This is a **streaming / causal prediction** setup.
+
+---
+
+### Input Data Format
+
+The loader expects a pickle file: `df_preprocessed.pkl`
+
+Each row contains a `preprocessed` dictionary:
+
+```json
+{
+  "original_text": str,
+  "tokens": List[str],
+  "lang_ids": List[str],
+  "ysw": List[int],
+  "ydur": List[int],
+}
+```
+---
+
+### Quick Start
+
+```python
+
+from data_utils import load_dataset
+
+bundle = load_dataset("df_preprocessed.pkl")
+
+ds = bundle.dataset
+loader = bundle.loader
+tokenizer = bundle.tokenizer
+```
+
+Batch format:
+```python
+input_ids, language_ids, ysw, ydur
+```
+Shapes:
+```python
+input_ids:   (B, window_size)  
+language_ids:(B, window_size)  
+ysw:         (B,)  
+ydur:        (B,)
+```
+---
+
+### Dataset Statistics
+
+Use:
+```python
+from data_utils import dataset_stats
+stats = dataset_stats(ds)
+```
+This prints switch rate, duration distribution, and padding ratio.
+
+Or use:
+Use:
+```python
+from data_utils import demo
+demo()
+```
+This demos a 3000-sampling process and results.
+
+
+### Notes
+
+- Left padding is used for early timesteps.
+- Switch is predicted for the next token (t+1).
+- Duration labels are bucketed:
+  - 0 → short (1–2 tokens)
+  - 1 → medium (3–6 tokens)
+  - 2 → long (≥7 tokens)
+  - -1 → not a switch
 
 
