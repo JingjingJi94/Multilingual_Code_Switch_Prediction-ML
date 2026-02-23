@@ -91,7 +91,7 @@ The model predicts:
 - `ysw[t]` → whether the next token (t+1) switches language  
 - `ydur[t]` → the duration class of the upcoming language segment
 
-This is a **streaming / causal prediction** setup.
+At timestep t, the model predicts properties of the upcoming transition between t and t+1 using only prefix context. This is a **streaming / causal prediction** setup.
 
 ---
 
@@ -148,7 +148,6 @@ stats = dataset_stats(ds)
 This prints switch rate, duration distribution, and padding ratio.
 
 Or use:
-Use:
 ```python
 from data_utils import demo
 demo()
