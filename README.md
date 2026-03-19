@@ -40,7 +40,7 @@ Two types of labels for each token in a sequence:
 
 ### 3.1 Token-Level Output Structure
 
-Each processed entry stored in the `preprocessed` column of `df_preprocessed.pkl` includes:
+Each processed entry stored in the `preprocessed` column of `preprocessed_data.pkl` includes:
 
 ```python
 {
@@ -97,7 +97,7 @@ At timestep t, the model predicts properties of the upcoming transition between 
 
 ### Input Data Format
 
-The loader expects a pickle file: `df_preprocessed.pkl`
+The loader expects a pickle file: `preprocessed_data.pkl`
 
 Each row contains a `preprocessed` dictionary:
 
@@ -118,7 +118,7 @@ Each row contains a `preprocessed` dictionary:
 
 from data_utils import load_dataset
 
-bundle = load_dataset("df_preprocessed.pkl")
+bundle = load_dataset("preprocessed_data.pkl")
 
 ds = bundle.dataset
 loader = bundle.loader

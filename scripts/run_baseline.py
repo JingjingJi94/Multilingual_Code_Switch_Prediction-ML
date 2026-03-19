@@ -1,3 +1,5 @@
+from collections import defaultdict
+import pickle
 import sys
 import pandas as pd
 sys.path.append(".")
@@ -27,32 +29,48 @@ def extract_samples(df):
 
 def run():
     print("=== Loading Data ===")
-    df = pd.read_pickle("df_preprocessed.pkl")
-    print(f"Total rows: {len(df)}")
-    print(f"Language pairs: {df['language_pair'].unique()}")
+    # Load the pickle list-of-dicts
+    with open("./data_preprocess/preprocessed_data.pkl", "rb") as f:
+        entries = pickle.load(f)
 
-    # Step 1: Row-level shuffle with fixed seed (reproducible)
-    df = df.sample(frac=1, random_state=RANDOM_SEED).reset_index(drop=True)
+    print(f"Total samples: {len(entries)}")
+    # Extract all language pairs
+    language_pairs = set(e.get("language_pair", "UNK") for e in entries)
+    print(f"Language pairs: {language_pairs}")
+
+    # Step 1: Shuffle
+    import random
+    random.seed(RANDOM_SEED)
+    entries = random.sample(entries, len(entries))
 
     # Step 2: Row-level train/test split (no sentence boundary leakage)
-    split_idx = int(len(df) * TRAIN_RATIO)
-    train_df = df.iloc[:split_idx]
-    test_df  = df.iloc[split_idx:]
-    print(f"Train rows: {len(train_df)}, Test rows: {len(test_df)}")
+    split_idx = int(len(entries) * TRAIN_RATIO)
+    train_entries = entries[:split_idx]
+    test_entries  = entries[split_idx:]
+    print(f"Train samples: {len(train_entries)}, Test samples: {len(test_entries)}")
 
     # Step 3: Extract tokens from train rows and fit naive model
-    print("\n=== Fitting Naive Baseline on Train Rows ===")
-    train_lids, train_ysw = extract_samples(train_df)
+    print("\n=== Fitting Naive Baseline on Train Samples ===")
+    train_lids = []
+    train_ysw = []
+    for e in train_entries:
+        train_lids.extend(e["lang_ids"])
+        train_ysw.extend(e["ysw"])
     print(f"Train tokens: {len(train_lids)}")
 
-    naive = NaiveSwitchPredictor(threshold=0.5)
+    naive = NaiveSwitchPredictor(threshold=0.2)
     naive.fit(train_lids, train_ysw)
 
     zero = ZeroBaseline()
 
     # Step 4: Overall evaluation on held-out test rows
-    print("\n=== Overall Results (held-out test rows) ===")
-    test_lids, test_ysw = extract_samples(test_df)
+    print("\n=== Overall Results (held-out test samples) ===")
+    test_lids = []
+    test_ysw = []
+    for e in test_entries:
+        test_lids.extend(e["lang_ids"])
+        test_ysw.extend(e["ysw"])
+
     print(f"Test tokens: {len(test_lids)}")
     print(f"Test switch rate: {sum(test_ysw) / len(test_ysw):.4f}")
 
@@ -68,13 +86,23 @@ def run():
 
     # Step 5: Per language pair evaluation on same held-out test rows
     # (universal naive baseline: trained on all pairs, tested per pair)
-    print("\n=== Per Language Pair Results (same held-out test rows) ===")
+    print("\n=== Per Language Pair Results (same held-out test samples) ===")
     print(f"{'Language Pair':<20} {'Model':<10} {'F1':>6} {'Precision':>10} {'Recall':>8}")
     print("-" * 60)
 
-    for pair in sorted(df['language_pair'].unique()):
-        pair_test_df = test_df[test_df['language_pair'] == pair]
-        pair_lids, pair_ysw = extract_samples(pair_test_df)
+    # Group test samples by language pair
+    pair_to_samples = defaultdict(list)
+    for e in test_entries:
+        lp = e.get("language_pair", "UNK")
+        pair_to_samples[lp].append(e)
+
+    for pair in sorted(pair_to_samples.keys()):
+        pair_entries = pair_to_samples[pair]
+        pair_lids = []
+        pair_ysw = []
+        for e in pair_entries:
+            pair_lids.extend(e["lang_ids"])
+            pair_ysw.extend(e["ysw"])
 
         naive_r = naive.evaluate(pair_lids, pair_ysw)
         zero_r  = zero.evaluate(pair_lids, pair_ysw)

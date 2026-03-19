@@ -247,7 +247,13 @@ def preprocess_and_label(df, tokenizer):
         language_pair = row.get("language_pair", None)
         # tokenize + language detection, and convert tokens to input ids
         tokens, lang_ids = tokenize_with_lang_mapping(text, tokenizer, language_pair)
-        input_ids = tokenizer.convert_tokens_to_ids(tokens)
+        # Convert tokens to IDs, replacing unknown tokens with tokenizer.unk_token_id
+        input_ids = []
+        for tok in tokens:
+            id_ = tokenizer.convert_tokens_to_ids(tok)
+            if id_ is None:
+                id_ = tokenizer.unk_token_id  # fallback for unknowns
+            input_ids.append(id_)
 
         # Generate predictive switch & duration labels
         ysw, ydur = generate_predictive_switch_labels(tokens, lang_ids)

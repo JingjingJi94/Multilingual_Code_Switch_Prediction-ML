@@ -1,5 +1,7 @@
 ML-code-prediction/
 __pycache__/
-/data/preprocessed_data.pkl
+# Pickle files
+*.pkl
+
 .DS_Store
 .ipynb_checkpoints/
