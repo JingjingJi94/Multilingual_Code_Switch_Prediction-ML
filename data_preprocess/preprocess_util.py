@@ -1,25 +1,7 @@
-from transformers import AutoModelForSequenceClassification
 from tqdm import tqdm  # optional, for progress bar
 import re
 import ast
-from langdetect import detect, DetectorFactory
-from langdetect.lang_detect_exception import LangDetectException
-
-
-def normalize_lang(lang):
-    lang = lang.lower()
-    
-    if lang.startswith("zh"):
-        return "zh"
-    if lang.startswith("hi"):
-        return "hi"
-    if lang.startswith("es"):
-        return "es"
-    if lang.startswith("en"):
-        return "en"
-    
-    # fallback for unexpected Latin predictions (sv, pt, it, etc.)
-    return "en"
+from lingua import Language, LanguageDetectorBuilder
 
 def is_chinese(word):
     """
@@ -36,49 +18,89 @@ def is_chinese(word):
 def is_hindi(word):
     return bool(re.search(r'[\u0900-\u097F]', word))
 
+spanish_chars = set("áéíóúüñÁÉÍÓÚÜÑ")
+spanish_stopwords = {
+    "de","la","el","y","los","las","en","un","una","por","para","con",
+    "del","al","se","que","como","su","es","está","este","esta","son"
+}
+punctuation_chars = set(".,!?;:()[]{}“”‘’\"…")
+
+def is_spanish(word):
+    """
+    Heuristic to detect if a word is Spanish:
+    - Contains Spanish accented characters or 'ñ'
+    - Or matches a Spanish stopword
+    """
+    word_lower = word.lower()
+    # check for accented characters
+    if any(c in spanish_chars for c in word):
+        return True
+    # check stopwords
+    if word_lower in spanish_stopwords:
+        return True
+
+    return False
+
+
+# Build a detector for English and Spanish
+detector = (
+    LanguageDetectorBuilder.from_languages(Language.ENGLISH, Language.SPANISH)
+    .build()
+)
+
 def detect_word_lang(word):
+    """
+    Detect language of a word:
+    - Chinese / Hindi heuristics first
+    - Spanish heuristic (accent + stopword)
+    - Lingua fallback for short/ambiguous words
+    """
     word = word.strip()
-    if not word:
-        return "en"
-    
-    # Script-based heuristic for chinese and hindi
+
+    # Chinese / Hindi
     if is_chinese(word):
         return "zh"
     if is_hindi(word):
         return "hi"
-    
-    # Use langdetect for Latin words
-    try:
-        lang = detect(word)
-        return normalize_lang(lang)
-    except LangDetectException:
-        return "en"
-    
-DetectorFactory.seed = 0
-def tokenize_with_lang_mapping(text, tokenizer):
-    """
-    Tokenize text with your model tokenizer and get lang_ids using transformer-based classifier.
-    Returns:
-        tokens: list of subword tokens (your model tokenizer)
-        lang_ids: list of language IDs aligned with tokens
-    """
-    words = text.split() 
-    tokens = [] 
-    lang_ids = []
 
-    for word in words: 
-        word_lang = detect_word_lang(word) 
-        # tokenize WITHOUT adding special tokens 
-        sub_tokens = tokenizer.tokenize(word) 
-        
-        tokens.extend(sub_tokens) 
-        # all_lang_ids.extend([word_lang] * len(sub_tokens)) 
-        
-        # Assign language to each subword 
-        for sub in sub_tokens: 
-            if is_chinese(sub): 
-                lang_ids.append("zh") # override for Chinese char/punct 
-            else: lang_ids.append(word_lang)
+    # Spanish heuristic
+    if is_spanish(word):
+        return "es"
+
+    # Fallback with Lingua
+    try:
+        lang = detector.detect_language_of(word)
+        if lang == Language.SPANISH:
+            return "es"
+        elif lang == Language.ENGLISH:
+            return "en"
+        else:
+            return "en"  # fallback
+    except:
+        return "en"
+
+def tokenize_with_lang_mapping(text, tokenizer, language_pair):
+    """
+    Tokenize text and assign language IDs using:
+    - is_spanish() heuristic
+    - Lingua fallback
+    - Chinese/Hindi heuristics
+    """
+    tokens = []
+    lang_ids = []
+    if language_pair == "Spanish-English":
+        words = text.split()
+        for word in words:
+            word_lang = detect_word_lang(word)
+            sub_tokens = tokenizer.tokenize(word)
+            tokens.extend(sub_tokens)
+
+            # Assign the detected language to ALL subwords
+            lang_ids.extend([word_lang] * len(sub_tokens))
+    else:
+        tokens = tokenizer.tokenize(text)
+        for tok in tokens:
+            lang_ids.append(detect_word_lang(tok))
 
     return tokens, lang_ids
 
@@ -137,9 +159,10 @@ def preprocess_and_label(df, tokenizer):
             text = " ".join(text_list)
         except:
             continue
-
+        
+        language_pair = row.get("language_pair", None)
         # Word-level detection + BPE mapping
-        tokens, lang_ids = tokenize_with_lang_mapping(text, tokenizer)
+        tokens, lang_ids = tokenize_with_lang_mapping(text, tokenizer, language_pair)
 
         # Generate predictive switch & duration labels
         ysw, ydur = generate_predictive_switch_labels(tokens, lang_ids)
