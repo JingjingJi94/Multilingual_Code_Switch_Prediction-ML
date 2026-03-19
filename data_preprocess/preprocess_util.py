@@ -228,9 +228,7 @@ def preprocess_and_label(df, tokenizer):
     """
     Preprocess df and store info in 'preprocessed' column with a progress bar.
     """
-    # Create the column if it doesn't exist
-    if "preprocessed" not in df.columns:
-        df["preprocessed"] = None
+    preprocessed_data = []
 
     # Wrap iterrows with tqdm
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="Preprocessing"):
@@ -247,22 +245,24 @@ def preprocess_and_label(df, tokenizer):
             continue
         
         language_pair = row.get("language_pair", None)
-        # Word-level detection + BPE mapping
+        # tokenize + language detection, and convert tokens to input ids
         tokens, lang_ids = tokenize_with_lang_mapping(text, tokenizer, language_pair)
+        input_ids = tokenizer.convert_tokens_to_ids(tokens)
 
         # Generate predictive switch & duration labels
         ysw, ydur = generate_predictive_switch_labels(tokens, lang_ids)
 
         # Store in dictionary
-        preprocessed_row = {
+        sample = {
+            "language_pair": language_pair,
             "original_text": text,
             "tokens": tokens,
+            "input_ids": input_ids,
             "lang_ids": lang_ids,
             "ysw": ysw,
             "ydur": ydur
         }
 
-        # Assign to DataFrame
-        df.at[idx, "preprocessed"] = preprocessed_row
+        preprocessed_data.append(sample)
 
-    return df
+    return preprocessed_data
