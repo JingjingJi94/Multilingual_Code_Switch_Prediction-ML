@@ -1,4 +1,5 @@
 ML-code-prediction/
 __pycache__/
-df_preprocessed.pkl
+/data/preprocessed_data.pkl
 .DS_Store
+.ipynb_checkpoints/
