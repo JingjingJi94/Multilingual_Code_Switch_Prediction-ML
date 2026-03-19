@@ -5,7 +5,7 @@ scikit-learn
 datasets
 matplotlib
 seaborn
-langdetect
+lingua-language-detector
 tqdm
 huggingface_hub
 transformers
