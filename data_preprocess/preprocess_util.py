@@ -1,4 +1,4 @@
-from tqdm import tqdm  # optional, for progress bar
+from tqdm import tqdm
 import re
 import ast
 from lingua import Language, LanguageDetectorBuilder
@@ -10,8 +10,9 @@ def is_chinese(word):
     # Check for any CJK character
     if re.search(r'[\u4e00-\u9fff]', word):
         return True
-    # Treat Chinese full stop as Chinese
-    if word in {'。'}:
+    # if word in {"。", "、","，"}:
+    #     return True
+    if re.search(r'[\u3000-\u303F]', word):
         return True
     return False
 
@@ -24,6 +25,20 @@ spanish_stopwords = {
     "del","al","se","que","como","su","es","está","este","esta","son"
 }
 punctuation_chars = set(".,!?;:()[]{}“”‘’\"…")
+def is_punctuation(token):
+    """
+    Detect punctuation (ASCII + Unicode punctuation).
+    """
+    return bool(re.fullmatch(r"[^\w\s]+", token))
+
+def is_number(subword):
+    """
+    Detect if a subword is numeric or mostly numeric.
+    Examples: ▁150
+    """
+    # Remove SentencePiece underscore if present
+    s = subword.lstrip('▁')
+    return s.replace('.', '', 1).isdigit()
 
 def is_spanish(word):
     """
@@ -56,7 +71,13 @@ def detect_word_lang(word):
     - Lingua fallback for short/ambiguous words
     """
     word = word.strip()
-
+    if not word:
+        return "en"
+    
+    # punctuation
+    if is_punctuation(word):
+        return "punct"
+    
     # Chinese / Hindi
     if is_chinese(word):
         return "zh"
@@ -79,63 +100,128 @@ def detect_word_lang(word):
     except:
         return "en"
 
+# def tokenize_with_lang_mapping(text, tokenizer, language_pair):
+#     """
+#     Tokenize text and assign language IDs using:
+#     - is_spanish() heuristic
+#     - Lingua fallback
+#     - Chinese/Hindi heuristics
+#     """
+#     tokens = []
+#     lang_ids = []
+#     if language_pair == "Spanish-English":
+#         words = text.split()
+#         for word in words:
+#             word_lang = detect_word_lang(word)
+#             sub_tokens = tokenizer.tokenize(word)
+#             tokens.extend(sub_tokens)
+
+#             # Assign language to each subword individually
+#             for sub in sub_tokens:
+#                 if is_punctuation(sub):
+#                     lang_ids.append("punct")
+                
+#                 else:
+#                     lang_ids.append(word_lang)
+#     else:
+#         tokens = tokenizer.tokenize(text)
+#         for tok in tokens:
+#             lang_ids.append(detect_word_lang(tok))
+
+#     return tokens, lang_ids
 def tokenize_with_lang_mapping(text, tokenizer, language_pair):
     """
-    Tokenize text and assign language IDs using:
-    - is_spanish() heuristic
-    - Lingua fallback
-    - Chinese/Hindi heuristics
+    Tokenize text and assign language IDs for subwords.
+    - punctuation → 'punct'
+    - numbers → inherit previous subword language
+    - Chinese/Hindi → heuristics
+    - Spanish heuristic + Lingua fallback
+    Special treatment for Spanish-English language_pair.
     """
     tokens = []
     lang_ids = []
+
     if language_pair == "Spanish-English":
         words = text.split()
         for word in words:
+            # full word is classified first, before any tokenization.
             word_lang = detect_word_lang(word)
             sub_tokens = tokenizer.tokenize(word)
             tokens.extend(sub_tokens)
 
-            # Assign the detected language to ALL subwords
-            lang_ids.extend([word_lang] * len(sub_tokens))
+            for i, sub in enumerate(sub_tokens):
+                if is_punctuation(sub):
+                    lang_ids.append("punct")
+                elif is_number(sub):
+                    # inherit previous language if exists, else word_lang
+                    if lang_ids:
+                        lang_ids.append(lang_ids[-1])
+                    else:
+                        lang_ids.append(word_lang)
+                else:
+                    lang_ids.append(word_lang)
     else:
-        tokens = tokenizer.tokenize(text)
-        for tok in tokens:
-            lang_ids.append(detect_word_lang(tok))
+        sub_tokens = tokenizer.tokenize(text)
+        for i, sub in enumerate(sub_tokens):
+            if is_punctuation(sub):
+                lang_ids.append("punct")
+            elif is_number(sub):
+                if lang_ids:
+                    lang_ids.append(lang_ids[-1])
+                else:
+                    # fallback: use Lingua detection
+                    lang_ids.append(detect_word_lang(sub))
+            else:
+                lang_ids.append(detect_word_lang(sub))
+        tokens = sub_tokens
 
     return tokens, lang_ids
 
 def generate_predictive_switch_labels(tokens, lang_ids):
     """
-    Generate ysw and ydur labels for a token sequence.
+    Generate ysw and ydur labels while ignoring punctuation tokens.
     """
     n = len(tokens)
     ysw = [0] * n
     ydur = [-1] * n
 
-    for t in range(n-1):
-        if lang_ids[t+1] != lang_ids[t]:
+    for t in range(n):
+
+        if lang_ids[t] == "punct":
+            continue
+
+        # find next non-punctuation token
+        j = t + 1
+        while j < n and lang_ids[j] == "punct":
+            j += 1
+
+        if j >= n:
+            continue
+
+        if lang_ids[j] != lang_ids[t]:
             ysw[t] = 1
-            # compute length of new language segment
-            new_lang = lang_ids[t+1]
+
+            new_lang = lang_ids[j]
             seg_len = 1
-            for k in range(t+2, n):
+            k = j + 1
+
+            while k < n:
+                if lang_ids[k] == "punct":
+                    k += 1
+                    continue
                 if lang_ids[k] == new_lang:
                     seg_len += 1
+                    k += 1
                 else:
                     break
-            # duration class
+
             if seg_len <= 2:
                 ydur[t] = 0
             elif seg_len <= 6:
                 ydur[t] = 1
             else:
                 ydur[t] = 2
-        else:
-            ysw[t] = 0
-            ydur[t] = -1
-    
-    ysw[-1] = 0
-    ydur[-1] = -1
+
     return ysw, ydur
 
 def preprocess_and_label(df, tokenizer):
