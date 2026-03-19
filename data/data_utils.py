@@ -1,3 +1,4 @@
+import pickle
 import random
 from collections import Counter
 from dataclasses import dataclass
@@ -33,22 +34,23 @@ def load_dataset(
     - entries: sequence-level dicts from df['preprocessed']
     - dataset: window-level samples from entries
     """
-    df = pd.read_pickle(data_file)
+    # Load the pickle (list of dicts)
+    with open(data_file, "rb") as f:
+        entries = pickle.load(f)
 
-    if "preprocessed" not in df.columns:
-        raise KeyError("Column 'preprocessed' not found in the dataframe.")
+    if not isinstance(entries, list):
+        raise ValueError(f"Expected a list of dicts, got {type(entries)}")
 
-    raw_entries = df["preprocessed"].dropna().tolist()
-    entries = [e for e in raw_entries if isinstance(e, dict)]
-
-    required_keys = {"tokens", "lang_ids", "ysw", "ydur"}
+    # Optional: sanity check
+    required_keys = {"tokens", "lang_ids", "ysw", "ydur", "input_ids"}
     missing = sum(1 for e in entries if not required_keys.issubset(e.keys()))
-    print(f"[load] cleaned entries: {len(entries)} (raw non-null: {len(raw_entries)})")
     if missing:
-        print(f"[load][WARN] {missing} entries missing some keys {required_keys}.")
+        print(f"[load][WARN] {missing} entries missing some required keys {required_keys}.")
 
+    # Tokenizer (must match preprocessing)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-
+    
+    # Dataset
     ds = SwitchLinguaStreamDataset(entries, tokenizer=tokenizer, window_size=window_size)
 
     loader = DataLoader(
@@ -188,7 +190,7 @@ def find_and_inspect_switch_samples(ds, tokenizer, max_find=5, scan_limit=200000
     print(f"found {found} switch samples")
 
 
-def demo(data_file: str = "df_preprocessed.pkl") -> None:
+def demo(data_file: str = "./data_preprocess/preprocessed_data.pkl") -> None:
     bundle = load_dataset(data_file=data_file)
 
     ds = bundle.dataset

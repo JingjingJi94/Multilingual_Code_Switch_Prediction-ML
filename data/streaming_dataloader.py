@@ -19,10 +19,11 @@ class SwitchLinguaStreamDataset(Dataset):
     """
     Streaming (prefix-only) dataset for next-token code-switch prediction.
 
-    Input sequence format (from df_preprocessed.pkl 'preprocessed' column):
+    Input sequence format (from ./data_preprocess/preprocessed_data.pkl):
         {
             "original_text": str,
             "tokens": List[str],   # subword tokens
+            "input_ids": List[str] # input_ids for tokens
             "lang_ids": List[str], # token-level language tags aligned to tokens (e.g., "en", "es")
             "ysw": List[int],      # switch labels per position t (predicts t+1 switch)
             "ydur": List[int],     # duration labels per position t (predicts upcoming segment length), -1 if not switch
@@ -93,6 +94,7 @@ class SwitchLinguaStreamDataset(Dataset):
 
         for i, seq in enumerate(sequences):
             tokens = seq.get("tokens")
+            input_ids = seq.get("input_ids")
             langs = seq.get("lang_ids")
             ysw = seq.get("ysw")
             ydur = seq.get("ydur")
@@ -117,7 +119,7 @@ class SwitchLinguaStreamDataset(Dataset):
                 continue
 
             # Convert tokens -> ids
-            input_ids = self._tokens_to_ids(tokens, seq_idx=i)
+            # input_ids = self._tokens_to_ids(tokens, seq_idx=i)
 
             # Convert lang tags -> ints
             try:
@@ -159,16 +161,16 @@ class SwitchLinguaStreamDataset(Dataset):
             lang2id = {"UNK": 0}
         return lang2id
 
-    def _tokens_to_ids(self, tokens: List[str], seq_idx: int) -> List[int]:
-        ids = self.tokenizer.convert_tokens_to_ids(tokens)
-        # Some tokenizers may return None for unknowns; guard
-        if any(x is None for x in ids):
-            bad_positions = [j for j, x in enumerate(ids) if x is None][:5]
-            raise ValueError(
-                f"Seq {seq_idx}: tokenizer returned None for some tokens at positions {bad_positions}. "
-                f"Check tokenizer vocab / tokenization consistency."
-            )
-        return [int(x) for x in ids]
+    # def _tokens_to_ids(self, tokens: List[str], seq_idx: int) -> List[int]:
+    #     ids = self.tokenizer.convert_tokens_to_ids(tokens)
+    #     # Some tokenizers may return None for unknowns; guard
+    #     if any(x is None for x in ids):
+    #         bad_positions = [j for j, x in enumerate(ids) if x is None][:5]
+    #         raise ValueError(
+    #             f"Seq {seq_idx}: tokenizer returned None for some tokens at positions {bad_positions}. "
+    #             f"Check tokenizer vocab / tokenization consistency."
+    #         )
+    #     return [int(x) for x in ids]
 
     def __len__(self) -> int:
         return len(self._index)
