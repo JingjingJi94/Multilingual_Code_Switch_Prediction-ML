@@ -2,9 +2,8 @@ import pickle
 import random
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List
 
-import pandas as pd
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader
 
@@ -22,7 +21,7 @@ class DataBundle:
 def load_dataset(
     data_file: str,
     model_name: str = "xlm-roberta-base",
-    window_size: int = 64,
+    window_size: int = 32,
     batch_size: int = 8,
     shuffle: bool = True,
     pin_memory: bool = False,
@@ -34,23 +33,19 @@ def load_dataset(
     - entries: sequence-level dicts from df['preprocessed']
     - dataset: window-level samples from entries
     """
-    # Load the pickle (list of dicts)
     with open(data_file, "rb") as f:
         entries = pickle.load(f)
 
     if not isinstance(entries, list):
         raise ValueError(f"Expected a list of dicts, got {type(entries)}")
 
-    # Optional: sanity check
     required_keys = {"tokens", "lang_ids", "ysw", "ydur", "input_ids"}
     missing = sum(1 for e in entries if not required_keys.issubset(e.keys()))
     if missing:
         print(f"[load][WARN] {missing} entries missing some required keys {required_keys}.")
 
-    # Tokenizer (must match preprocessing)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    
-    # Dataset
+
     ds = SwitchLinguaStreamDataset(entries, tokenizer=tokenizer, window_size=window_size)
 
     loader = DataLoader(
@@ -62,8 +57,15 @@ def load_dataset(
 
     # quick shape check
     batch = next(iter(loader))
-    input_ids, language_ids, ysw, ydur = batch
-    print("[load] batch shapes:", input_ids.shape, language_ids.shape, ysw.shape, ydur.shape)
+    input_ids, language_ids, attention_mask, ysw, ydur = batch
+    print(
+        "[load] batch shapes:",
+        input_ids.shape,
+        language_ids.shape,
+        attention_mask.shape,
+        ysw.shape,
+        ydur.shape,
+    )
 
     return DataBundle(entries=entries, tokenizer=tokenizer, dataset=ds, loader=loader)
 
@@ -81,35 +83,39 @@ def inspect_sample(
     if i < 0 or i >= len(ds):
         raise IndexError(f"i={i} out of range (0..{len(ds)-1})")
 
-    x_ids, x_lang, y_sw, y_dur = ds[i]
+    x_ids, x_lang, attention_mask, y_sw, y_dur = ds[i]
 
     x_ids_list = x_ids.tolist()
     x_lang_list = x_lang.tolist()
+    attn_list = attention_mask.tolist()
     y_sw = int(y_sw)
     y_dur = int(y_dur)
 
     unique_ids = len(set(x_ids_list))
     pad_id = tokenizer.pad_token_id
 
-    # how much padding in this window (token pad and lang pad)
-    token_pad_ratio = sum(1 for v in x_ids_list if v == pad_id) / len(x_ids_list)
+    token_pad_ratio = 1.0 - (sum(attn_list) / len(attn_list))
     lang_pad_ratio = sum(1 for v in x_lang_list if v == lang_pad_id) / len(x_lang_list)
 
     print(f"\n=== sample i={i} | ysw={y_sw} | ydur={y_dur} ===")
     print("input_ids shape:", getattr(x_ids, "shape", None))
     print("lang_ids shape:", getattr(x_lang, "shape", None))
+    print("attention_mask shape:", getattr(attention_mask, "shape", None))
     print("unique ids:", unique_ids)
     print(f"pad_token_id: {pad_id} | token_pad_ratio: {token_pad_ratio:.3f} | lang_pad_ratio: {lang_pad_ratio:.3f}")
 
     tail_ids = x_ids_list[-show_last_k:]
     tail_lang = x_lang_list[-show_last_k:]
+    tail_attn = attn_list[-show_last_k:]
+
     print(f"last {show_last_k} ids:", tail_ids)
     print(f"last {show_last_k} lang:", tail_lang)
+    print(f"last {show_last_k} attention_mask:", tail_attn)
+    print("valid tokens by mask:", sum(attn_list), "/", len(attn_list))
 
     print("decoded(no-skip):", tokenizer.decode(x_ids_list, skip_special_tokens=False))
     print("decoded(skip):", tokenizer.decode(x_ids_list, skip_special_tokens=True))
 
-    # decode last token for quick sanity
     try:
         print("last id token:", tokenizer.convert_ids_to_tokens([x_ids_list[-1]]))
     except Exception:
@@ -136,25 +142,20 @@ def dataset_stats(
     token_pad_ratios = []
     lang_pad_ratios = []
 
-    # Need tokenizer pad id: ds should have tokenizer attached or you pass it.
-    # If your dataset doesn't expose pad id, you can remove token_pad_ratio.
-    tokenizer = getattr(ds, "tokenizer", None)
-
     for i in idxs:
-        x_ids, x_lang, y_sw, y_dur = ds[i]
+        x_ids, x_lang, attention_mask, y_sw, y_dur = ds[i]
         y_sw = int(y_sw)
         y_dur = int(y_dur)
+
         sw_cnt += y_sw
         if y_dur != -1:
             ydur_counter[y_dur] += 1
 
         lang = x_lang.tolist()
-        lang_pad_ratios.append(sum(1 for v in lang if v == lang_pad_id) / len(lang))
+        attn = attention_mask.tolist()
 
-        if tokenizer is not None and getattr(tokenizer, "pad_token_id", None) is not None:
-            ids = x_ids.tolist()
-            pad_id = tokenizer.pad_token_id
-            token_pad_ratios.append(sum(1 for v in ids if v == pad_id) / len(ids))
+        lang_pad_ratios.append(sum(1 for v in lang if v == lang_pad_id) / len(lang))
+        token_pad_ratios.append(1.0 - sum(attn) / len(attn))
 
     stats = {
         "num_windows": n,
@@ -163,7 +164,7 @@ def dataset_stats(
         "ydur_valid_rate": (sum(ydur_counter.values()) / k),
         "ydur_top10": ydur_counter.most_common(10),
         "avg_lang_pad_ratio": sum(lang_pad_ratios) / len(lang_pad_ratios),
-        "avg_token_pad_ratio": (sum(token_pad_ratios) / len(token_pad_ratios)) if token_pad_ratios else None,
+        "avg_token_pad_ratio": sum(token_pad_ratios) / len(token_pad_ratios),
     }
 
     print("\n[stats]")
@@ -173,17 +174,20 @@ def dataset_stats(
     return stats
 
 
-
 def find_and_inspect_switch_samples(ds, tokenizer, max_find=5, scan_limit=200000, K=12):
     found = 0
     for i in range(min(len(ds), scan_limit)):
-        x_ids, x_lang, y_sw, y_dur = ds[i]
+        x_ids, x_lang, attention_mask, y_sw, y_dur = ds[i]
         if int(y_sw) == 1:
             ids = x_ids.tolist()
             lang = x_lang.tolist()
+            attn = attention_mask.tolist()
+
             tail = [v for v in lang[-K:] if v != -1]
             print(f"\n[SWITCH i={i}] ydur={int(y_dur)} tail_lang={tail}")
+            print("tail attention_mask:", attn[-K:])
             print("decoded:", tokenizer.decode(ids, skip_special_tokens=True)[:220])
+
             found += 1
             if found >= max_find:
                 break
@@ -196,7 +200,6 @@ def demo(data_file: str = "./data_preprocess/preprocessed_data.pkl") -> None:
     ds = bundle.dataset
     tok = bundle.tokenizer
 
-    # Show a few diverse positions (early/mid/late/random)
     indices = [0, 100, 1000, len(ds) // 2, len(ds) - 1, random.randint(0, len(ds) - 1)]
     for i in indices:
         inspect_sample(ds, tok, i)
@@ -206,6 +209,3 @@ def demo(data_file: str = "./data_preprocess/preprocessed_data.pkl") -> None:
 
 
 demo()
-
-
-
