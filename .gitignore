@@ -5,3 +5,7 @@ __pycache__/
 
 .DS_Store
 .ipynb_checkpoints/
+
+plots/loss_curve_lambda2_*.png
+
+/training/*.txt
