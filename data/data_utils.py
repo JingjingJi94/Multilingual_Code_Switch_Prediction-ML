@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader
 
-from streaming_dataloader import SwitchLinguaStreamDataset
+from .streaming_dataloader import SwitchLinguaStreamDataset
 
 
 @dataclass
@@ -21,7 +21,7 @@ class DataBundle:
 def load_dataset(
     data_file: str,
     model_name: str = "xlm-roberta-base",
-    window_size: int = 32,
+    window_size: int = 64,
     batch_size: int = 8,
     shuffle: bool = True,
     pin_memory: bool = False,

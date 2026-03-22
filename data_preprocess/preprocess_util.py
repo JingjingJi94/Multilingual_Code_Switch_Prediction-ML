@@ -100,79 +100,73 @@ def detect_word_lang(word):
     except:
         return "en"
 
-# def tokenize_with_lang_mapping(text, tokenizer, language_pair):
-#     """
-#     Tokenize text and assign language IDs using:
-#     - is_spanish() heuristic
-#     - Lingua fallback
-#     - Chinese/Hindi heuristics
-#     """
-#     tokens = []
-#     lang_ids = []
-#     if language_pair == "Spanish-English":
-#         words = text.split()
-#         for word in words:
-#             word_lang = detect_word_lang(word)
-#             sub_tokens = tokenizer.tokenize(word)
-#             tokens.extend(sub_tokens)
-
-#             # Assign language to each subword individually
-#             for sub in sub_tokens:
-#                 if is_punctuation(sub):
-#                     lang_ids.append("punct")
-                
-#                 else:
-#                     lang_ids.append(word_lang)
-#     else:
-#         tokens = tokenizer.tokenize(text)
-#         for tok in tokens:
-#             lang_ids.append(detect_word_lang(tok))
-
-#     return tokens, lang_ids
 def tokenize_with_lang_mapping(text, tokenizer, language_pair):
     """
     Tokenize text and assign language IDs for subwords.
-    - punctuation → 'punct'
-    - numbers → inherit previous subword language
-    - Chinese/Hindi → heuristics
-    - Spanish heuristic + Lingua fallback
-    Special treatment for Spanish-English language_pair.
+    Guarantees at most two languages per sequence.
     """
+
     tokens = []
     lang_ids = []
 
+    # Define allowed languages
+    if language_pair == "Spanish-English":
+        allowed_langs = {"es", "en"}
+    elif language_pair == "Chinese-English":
+        allowed_langs = {"zh", "en"}
+    elif language_pair == "Hindi-English":
+        allowed_langs = {"hi", "en"}
+    else:
+        allowed_langs = {"en"}
+
+    def clamp_lang(lang):
+        """Force language into allowed set."""
+        if lang in allowed_langs or lang == "punct":
+            return lang
+        # fallback to English if available
+        if "en" in allowed_langs:
+            return "en"
+        return list(allowed_langs)[0]
+
     if language_pair == "Spanish-English":
         words = text.split()
+
         for word in words:
-            # full word is classified first, before any tokenization.
-            word_lang = detect_word_lang(word)
+            word_lang = clamp_lang(detect_word_lang(word))
+
             sub_tokens = tokenizer.tokenize(word)
             tokens.extend(sub_tokens)
 
-            for i, sub in enumerate(sub_tokens):
+            for sub in sub_tokens:
                 if is_punctuation(sub):
                     lang_ids.append("punct")
+
                 elif is_number(sub):
-                    # inherit previous language if exists, else word_lang
                     if lang_ids:
                         lang_ids.append(lang_ids[-1])
                     else:
                         lang_ids.append(word_lang)
+
                 else:
                     lang_ids.append(word_lang)
+
     else:
         sub_tokens = tokenizer.tokenize(text)
-        for i, sub in enumerate(sub_tokens):
+
+        for sub in sub_tokens:
+
             if is_punctuation(sub):
                 lang_ids.append("punct")
+
             elif is_number(sub):
                 if lang_ids:
                     lang_ids.append(lang_ids[-1])
                 else:
-                    # fallback: use Lingua detection
-                    lang_ids.append(detect_word_lang(sub))
+                    lang_ids.append(clamp_lang(detect_word_lang(sub)))
+
             else:
-                lang_ids.append(detect_word_lang(sub))
+                lang_ids.append(clamp_lang(detect_word_lang(sub)))
+
         tokens = sub_tokens
 
     return tokens, lang_ids
