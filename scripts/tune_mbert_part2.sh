@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Hyperparameter sweep — part 2 of 2 (7 runs)
-# Run in parallel with tune_part1.sh
-# Usage: bash scripts/tune_part2.sh [--backbone xlmr|mbert|both] [--debug]
+# Hyperparameter sweep for mBERT — part 2 of 2 (7 runs)
+# Run in parallel with tune_mbert_part1.sh
+# Usage: bash scripts/tune_mbert_part2.sh [--debug]
 
 set -euo pipefail
 
@@ -20,19 +20,20 @@ RUNS=(
 for RUN in "${RUNS[@]}"; do
     LR=$(echo "$RUN" | awk '{print $1}')
     LDUR=$(echo "$RUN" | awk '{print $2}')
-    RUN_DIR="logs/tune/lr${LR}_ldur${LDUR}"
+    RUN_DIR="logs/tune_mbert/lr${LR}_ldur${LDUR}"
     echo "=========================================="
-    echo " [part2] lr=${LR}  lambda-dur=${LDUR}"
+    echo " [mbert part2] lr=${LR}  lambda-dur=${LDUR}"
     echo " log-dir: ${RUN_DIR}"
     echo "=========================================="
     python3 training/train.py \
+        --backbone mbert \
         --lr "${LR}" \
         --lambda-dur "${LDUR}" \
         --log-dir "${RUN_DIR}" \
         ${EXTRA_ARGS}
 done
 
-echo "[part2] Done. Logs saved under logs/tune/"
+echo "[mbert part2] Done. Logs saved under logs/tune_mbert/"
 echo ""
 echo "View all runs with:"
-echo "  tensorboard --logdir logs/tune"
+echo "  tensorboard --logdir logs/tune_mbert"

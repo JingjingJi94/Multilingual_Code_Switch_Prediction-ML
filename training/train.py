@@ -195,24 +195,6 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_amp = device.type == "cuda"
 
-    bundle = load_dataset("./data_preprocess/preprocessed_data.pkl", batch_size=256)
-
-    if args.debug:
-        n_total = len(bundle.dataset)
-        n_sub = max(1, n_total // 100)
-        indices = torch.randperm(n_total)[:n_sub].tolist()
-        sub_ds = torch.utils.data.Subset(bundle.dataset, indices)
-        debug_loader = torch.utils.data.DataLoader(
-            sub_ds, batch_size=256, shuffle=True, pin_memory=False
-        )
-        bundle = bundle.__class__(
-            entries=bundle.entries,
-            tokenizer=bundle.tokenizer,
-            dataset=sub_ds,
-            loader=debug_loader,
-        )
-        print(f"[debug] Using {n_sub}/{n_total} samples (1%)")
-
     all_backbones = [
         ("xlmr", "xlm-roberta-base"),
         ("mbert", "bert-base-multilingual-cased"),
@@ -225,6 +207,25 @@ def main() -> None:
     os.makedirs(save_dir, exist_ok=True)
 
     for model_name, backbone_name in backbones:
+        data_file = f"./data_preprocess/preprocessed_data_{model_name}.pkl"
+        bundle = load_dataset(data_file, model_name=backbone_name, batch_size=256)
+
+        if args.debug:
+            n_total = len(bundle.dataset)
+            n_sub = max(1, n_total // 100)
+            indices = torch.randperm(n_total)[:n_sub].tolist()
+            sub_ds = torch.utils.data.Subset(bundle.dataset, indices)
+            debug_loader = torch.utils.data.DataLoader(
+                sub_ds, batch_size=256, shuffle=True, pin_memory=False
+            )
+            bundle = bundle.__class__(
+                entries=bundle.entries,
+                tokenizer=bundle.tokenizer,
+                dataset=sub_ds,
+                loader=debug_loader,
+            )
+            print(f"[debug] Using {n_sub}/{n_total} samples (1%)")
+
         with open(os.path.join(log_dir, f"training_results_{model_name}.txt"), "w") as log_file:
             def log_fn(msg: str, _f=log_file) -> None:
                 print(msg)
