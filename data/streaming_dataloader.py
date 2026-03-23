@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import random
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
@@ -50,6 +51,7 @@ class SwitchLinguaStreamDataset(Dataset):
         sequences: Sequence[Dict[str, Any]],
         tokenizer: Any,
         window_size: int = 64,
+        sample_rate=0.5,
         lang2id: Optional[Dict[str, int]] = None,
         pad_token_id: Optional[int] = None,
         pad_lang_id: int = -1,
@@ -121,8 +123,13 @@ class SwitchLinguaStreamDataset(Dataset):
             )
 
             max_t = (L - 2) if drop_last_token else (L - 1)
-            for t in range(0, max_t + 1):
+            all_t = list(range(0, max_t + 1))
+            k = max(1, int(len(all_t) * sample_rate))
+            sampled_t = random.sample(all_t, k)  # random sample
+            for t in sorted(sampled_t):
                 self._index.append(StreamSampleIndex(seq_idx=i, t=t))
+            # for t in range(0, max_t + 1):
+            #     self._index.append(StreamSampleIndex(seq_idx=i, t=t))
 
     @staticmethod
     def _build_lang2id(sequences: Sequence[Dict[str, Any]]) -> Dict[str, int]:
