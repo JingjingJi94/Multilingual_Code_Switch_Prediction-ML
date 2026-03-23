@@ -168,6 +168,11 @@ def main() -> None:
         default="both",
         help="Which backbone to train: xlmr, mbert, or both (default: both)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Subsample 1%% of training data for quick debugging",
+    )
     args = parser.parse_args()
     log_dir = args.log_dir
     os.makedirs(log_dir, exist_ok=True)
@@ -176,6 +181,22 @@ def main() -> None:
     use_amp = device.type == "cuda"
 
     bundle = load_dataset("./data_preprocess/preprocessed_data.pkl", batch_size=256)
+
+    if args.debug:
+        n_total = len(bundle.dataset)
+        n_sub = max(1, n_total // 100)
+        indices = torch.randperm(n_total)[:n_sub].tolist()
+        sub_ds = torch.utils.data.Subset(bundle.dataset, indices)
+        debug_loader = torch.utils.data.DataLoader(
+            sub_ds, batch_size=256, shuffle=True, pin_memory=False
+        )
+        bundle = bundle.__class__(
+            entries=bundle.entries,
+            tokenizer=bundle.tokenizer,
+            dataset=sub_ds,
+            loader=debug_loader,
+        )
+        print(f"[debug] Using {n_sub}/{n_total} samples (1%)")
 
     all_backbones = [
         ("xlmr", "xlm-roberta-base"),
@@ -234,16 +255,21 @@ def main() -> None:
 
 # Usage examples:
 #   Run both backbones with default settings:
-#     python training/train.py
+#     python3 training/train.py
 #
 #   Run a single backbone:
-#     python training/train.py --backbone xlmr
-#     python training/train.py --backbone mbert
+#     python3 training/train.py --backbone xlmr
+#     python3 training/train.py --backbone mbert
 #
 #   Save logs to a custom directory (created if absent):
-#     python training/train.py --log-dir ./logs/run1
+#     python3 training/train.py --log-dir ./logs/run1
 #
 #   Combine options:
-#     python training/train.py --backbone xlmr --log-dir ./logs/xlmr_run1
+#     python3 training/train.py --backbone xlmr --log-dir ./logs/xlmr_run1
+#
+#   Debug mode (1% data subsample for quick iteration):
+#     python3 training/train.py --debug
+#     python3 training/train.py --debug --backbone xlmr
+#     python3 training/train.py --debug --backbone xlmr --log-dir ./logs/debug
 if __name__ == "__main__":
     main()
