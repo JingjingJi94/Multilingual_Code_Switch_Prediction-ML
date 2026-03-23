@@ -5,7 +5,6 @@ rsync -avz --progress \
     --exclude '.git' \
     --exclude '__pycache__' \
     --exclude '*.pyc' \
-    --exclude 'data_preprocess/preprocessed_data.pkl' \
     --exclude 'checkpoints/' \
     --exclude 'logs/' \
     --exclude 'runs/' \
