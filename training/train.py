@@ -180,6 +180,14 @@ def main() -> None:
         action="store_true",
         help="Subsample 1%% of training data for quick debugging",
     )
+    parser.add_argument("--epochs", type=int, default=None,
+        help="Number of training epochs (default: 2 in debug mode, 5 otherwise)")
+    parser.add_argument("--lr", type=float, default=1e-5,
+        help="AdamW learning rate (default: 1e-5)")
+    parser.add_argument("--lambda-sw", type=float, default=1.0,
+        help="Loss weight for switch head (default: 1.0)")
+    parser.add_argument("--lambda-dur", type=float, default=0.5,
+        help="Loss weight for duration head (default: 0.5)")
     args = parser.parse_args()
     log_dir = args.log_dir
     os.makedirs(log_dir, exist_ok=True)
@@ -211,8 +219,8 @@ def main() -> None:
     ]
     backbones = all_backbones if args.backbone == "both" else [b for b in all_backbones if b[0] == args.backbone]
 
-    num_epochs = 2 if args.debug else 5
-    lr = 1e-5
+    num_epochs = args.epochs if args.epochs is not None else (2 if args.debug else 5)
+    lr = args.lr
     save_dir = "./checkpoints"
     os.makedirs(save_dir, exist_ok=True)
 
@@ -226,8 +234,7 @@ def main() -> None:
             log_fn(f"\n=== Training {model_name} ({backbone_name}) ===")
             writer = SummaryWriter(log_dir=os.path.join(log_dir, "tensorboard", model_name))
 
-            criterion = MultiTaskLoss()
-            criterion.lambda_dur = 0.5
+            criterion = MultiTaskLoss(lambda_sw=args.lambda_sw, lambda_dur=args.lambda_dur)
 
             model = DualHeadCausalModel(backbone_name=backbone_name).to(device)
 
@@ -274,9 +281,14 @@ def main() -> None:
 #   Combine options:
 #     python3 training/train.py --backbone xlmr --log-dir ./logs/xlmr_run1
 #
-#   Debug mode (1% data subsample for quick iteration):
+#   Debug mode (1% data subsample, 2 epochs by default):
 #     python3 training/train.py --debug
 #     python3 training/train.py --debug --backbone xlmr
 #     python3 training/train.py --debug --backbone xlmr --log-dir ./logs/debug
+#
+#   Override hyperparameters:
+#     python3 training/train.py --epochs 10 --lr 2e-5
+#     python3 training/train.py --lambda-sw 1.0 --lambda-dur 0.3
+#     python3 training/train.py --debug --backbone xlmr --epochs 1 --lr 2e-5 --lambda-sw 1.0 --lambda-dur 0.3
 if __name__ == "__main__":
     main()
