@@ -22,7 +22,7 @@ def load_dataset(
     data_file: str,
     model_name: str = "xlm-roberta-base",
     window_size: int = 64,
-    batch_size: int = 8,
+    batch_size: int = 256,
     shuffle: bool = True,
     pin_memory: bool = False,
 ) -> DataBundle:
@@ -33,8 +33,10 @@ def load_dataset(
     - entries: sequence-level dicts from df['preprocessed']
     - dataset: window-level samples from entries
     """
+    print(f"[load] Reading pickle: {data_file} ...")
     with open(data_file, "rb") as f:
         entries = pickle.load(f)
+    print(f"[load] Loaded {len(entries)} entries")
 
     if not isinstance(entries, list):
         raise ValueError(f"Expected a list of dicts, got {type(entries)}")
@@ -45,8 +47,10 @@ def load_dataset(
         print(f"[load][WARN] {missing} entries missing some required keys {required_keys}.")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
+    print(f"[load] Tokenizer ready")
 
     ds = SwitchLinguaStreamDataset(entries, tokenizer=tokenizer, window_size=window_size)
+    print(f"[load] Dataset ready: {len(ds)} windows")
 
     loader = DataLoader(
         ds,
@@ -56,6 +60,7 @@ def load_dataset(
     )
 
     # quick shape check
+    print(f"[load] Verifying batch shapes ...")
     batch = next(iter(loader))
     input_ids, language_ids, attention_mask, ysw, ydur = batch
     print(
@@ -208,4 +213,5 @@ def demo(data_file: str = "./data_preprocess/preprocessed_data.pkl") -> None:
     find_and_inspect_switch_samples(ds, tok)
 
 
-demo()
+if __name__ == "__main__":
+    demo()

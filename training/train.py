@@ -1,95 +1,249 @@
-import torch
-import sys
-sys.path.append(".")
-from models.dual_head_model import DualHeadCausalModel
-from data.data_utils import load_dataset
-from losses import MultiTaskLoss
+import argparse
 import os
+import sys
+from typing import Callable, Optional
 
-log_path = os.path.join(save_dir, "training_log.txt")
-log_file = open(log_path, "w")
-# Set device
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+import numpy as np
+import torch
+import torch.nn.functional as F
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    balanced_accuracy_score,
+    f1_score,
+)
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
-# Load dataset
-bundle = load_dataset("./data_preprocess/preprocessed_data.pkl")
-loader = bundle.loader
+sys.path.append(".")
+from data.data_utils import load_dataset
+from models.dual_head_model import DualHeadCausalModel
+from training.losses import MultiTaskLoss
 
-# List of backbones to compare
-backbones = [
-    ("xlmr", "xlm-roberta-base"),
-    ("mbert", "bert-base-multilingual-cased")
-]
 
-# Training settings
-num_epochs = 3
-lr = 2e-5
-save_dir = "./checkpoints"
-os.makedirs(save_dir, exist_ok=True)
-log_path = os.path.join(save_dir, "training_log.txt")
-log_file = open(log_path, "w")
+def run_epoch(
+    model: torch.nn.Module,
+    loader: torch.utils.data.DataLoader,
+    optimizer: torch.optim.Optimizer,
+    criterion: MultiTaskLoss,
+    device: torch.device,
+    scaler: Optional["torch.amp.GradScaler"],
+    use_amp: bool,
+) -> dict:
+    """Run one training epoch. Returns a dict of averaged losses and collected arrays."""
+    model.train()
 
-# Multi-task loss
-criterion = MultiTaskLoss()
+    total_loss = 0.0
+    total_Lsw = 0.0
+    total_Ldur = 0.0
+    num_batches = 0
 
-for model_name, backbone_name in backbones:
-    print(f"\n=== Training {model_name} ({backbone_name}) ===")
-    
-    # Initialize model and optimizer, add two prediction heads
-    model = DualHeadCausalModel(backbone_name=backbone_name).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    all_sw_preds, all_sw_labels, all_sw_probs = [], [], []
+    all_dur_preds, all_dur_labels, all_dur_probs = [], [], []
 
-    # Training loop
-    for epoch in range(num_epochs):
-        model.train()
-        total_loss = 0.0
-        total_Lsw = 0.0
-        total_Ldur = 0.0
-        num_batches = 0
-        
-        # Batch loop
-        for batch in loader:
-            input_ids, lang_ids, attention_mask, ysw, ydur = batch
-            input_ids = input_ids.to(device)
-            attention_mask = attention_mask.to(device)
-            ysw = ysw.to(device)
-            ydur = ydur.to(device)
+    for batch in tqdm(loader, desc="  batches", leave=False):
+        input_ids, _, attention_mask, ysw, ydur = batch
+        input_ids = input_ids.to(device)
+        attention_mask = attention_mask.to(device)
+        ysw = ysw.to(device)
+        ydur = ydur.to(device)
 
-            # Clears gradients from previous batch, ensuring each batch updates the model independently.
-            optimizer.zero_grad() 
-            
-            # Forward pass, produces raw predictions for both heads
+        optimizer.zero_grad()
+
+        if use_amp:
+            with torch.amp.autocast(device_type="cuda"):
+                switch_logits, duration_logits = model(input_ids, attention_mask)
+                loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
             switch_logits, duration_logits = model(input_ids, attention_mask)
-            
-            # Compute multi-task loss
             loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
-            #calculates gradients of all model parameters w.r.t loss.
             loss.backward()
             optimizer.step()
-            
-            # Accumulate losses for logging
-            total_loss += loss.item()
-            total_Lsw += L_sw.item()
-            total_Ldur += L_dur.item()
-            num_batches += 1
 
-        avg_loss = total_loss / num_batches
-        avg_Lsw = total_Lsw / num_batches
-        avg_Ldur = total_Ldur / num_batches
+        total_loss += loss.item()
+        total_Lsw += L_sw.item()
+        total_Ldur += L_dur.item()
+        num_batches += 1
 
-        #save output to file
-        msg = (
+        # .float() before softmax to avoid float16 metric noise under AMP
+        sw_logits_f = switch_logits.detach().float()
+        dur_logits_f = duration_logits.detach().float()
+
+        sw_probs = F.softmax(sw_logits_f, dim=-1)
+        dur_probs = F.softmax(dur_logits_f, dim=-1)
+
+        all_sw_preds.extend(sw_logits_f.argmax(dim=-1).cpu().numpy())
+        all_sw_labels.extend(ysw.cpu().numpy())
+        all_sw_probs.extend(sw_probs[:, 1].cpu().numpy())
+
+        all_dur_preds.extend(dur_logits_f.argmax(dim=-1).cpu().numpy())
+        all_dur_labels.extend(ydur.cpu().numpy())
+        all_dur_probs.extend(dur_probs[:, 1].cpu().numpy())
+
+    return {
+        "avg_loss": total_loss / num_batches,
+        "avg_Lsw": total_Lsw / num_batches,
+        "avg_Ldur": total_Ldur / num_batches,
+        "sw_preds": np.array(all_sw_preds),
+        "sw_labels": np.array(all_sw_labels),
+        "sw_probs": np.array(all_sw_probs),
+        "dur_preds": np.array(all_dur_preds),
+        "dur_labels": np.array(all_dur_labels),
+        "dur_probs": np.array(all_dur_probs),
+    }
+
+
+def train(
+    model: torch.nn.Module,
+    loader: torch.utils.data.DataLoader,
+    optimizer: torch.optim.Optimizer,
+    criterion: MultiTaskLoss,
+    num_epochs: int,
+    device: torch.device,
+    writer: SummaryWriter,
+    model_name: str,
+    save_dir: str,
+    log_fn: Callable[[str], None],
+    use_amp: bool = True,
+    scaler: Optional["torch.amp.GradScaler"] = None,
+) -> None:
+    """Full training loop over num_epochs. Logs metrics and saves checkpoints."""
+    epoch_bar = tqdm(range(num_epochs), desc=f"[{model_name}] epochs")
+    for epoch in epoch_bar:
+        results = run_epoch(model, loader, optimizer, criterion, device, scaler, use_amp)
+
+        avg_loss = results["avg_loss"]
+        avg_Lsw = results["avg_Lsw"]
+        avg_Ldur = results["avg_Ldur"]
+
+        sw_f1 = f1_score(results["sw_labels"], results["sw_preds"], average="macro", zero_division=0)
+        sw_acc = accuracy_score(results["sw_labels"], results["sw_preds"])
+        sw_bal_acc = balanced_accuracy_score(results["sw_labels"], results["sw_preds"])
+        sw_auprc = average_precision_score(results["sw_labels"], results["sw_probs"])
+
+        dur_f1 = f1_score(results["dur_labels"], results["dur_preds"], average="macro", zero_division=0)
+        dur_acc = accuracy_score(results["dur_labels"], results["dur_preds"])
+        dur_bal_acc = balanced_accuracy_score(results["dur_labels"], results["dur_preds"])
+        dur_auprc = average_precision_score(results["dur_labels"], results["dur_probs"])
+
+        epoch_bar.set_postfix(loss=f"{avg_loss:.4f}", sw_f1=f"{sw_f1:.4f}", dur_f1=f"{dur_f1:.4f}")
+
+        global_step = epoch + 1
+
+        writer.add_scalars("Loss", {
+            "total": avg_loss, "switch": avg_Lsw, "duration": avg_Ldur
+        }, global_step)
+
+        writer.add_scalars("Switch/Classification", {
+            "F1": sw_f1, "Accuracy": sw_acc, "Bal_Acc": sw_bal_acc, "AUPRC": sw_auprc,
+        }, global_step)
+
+        writer.add_scalars("Duration/Classification", {
+            "F1": dur_f1, "Accuracy": dur_acc, "Bal_Acc": dur_bal_acc, "AUPRC": dur_auprc,
+        }, global_step)
+
+        log_fn(
             f"Epoch {epoch+1}/{num_epochs} | "
-            f"Total Loss: {avg_loss:.4f} | "
-            f"Switch Loss: {avg_Lsw:.4f} | "
-            f"Duration Loss: {avg_Ldur:.4f}"
+            f"Loss {avg_loss:.4f} (sw {avg_Lsw:.4f}, dur {avg_Ldur:.4f})\n"
+            f"  Switch   — F1 {sw_f1:.4f}  Acc {sw_acc:.4f}  "
+            f"BalAcc {sw_bal_acc:.4f}  AUPRC {sw_auprc:.4f}\n"
+            f"  Duration — F1 {dur_f1:.4f}  Acc {dur_acc:.4f}  "
+            f"BalAcc {dur_bal_acc:.4f}  AUPRC {dur_auprc:.4f}"
         )
-        print(msg)              # console
-        log_file.write(msg + "\n")  # file
-        log_file.close()
-        print(f"Training log saved to {log_path}")
 
-        # Save checkpoint
         ckpt_path = os.path.join(save_dir, f"{model_name}_epoch{epoch+1}.pt")
         torch.save(model.state_dict(), ckpt_path)
-        print(f"Saved checkpoint: {ckpt_path}")
+        log_fn(f"Saved checkpoint: {ckpt_path}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--log-dir", default=".", help="Directory for training result log files")
+    parser.add_argument(
+        "--backbone",
+        choices=["xlmr", "mbert", "both"],
+        default="both",
+        help="Which backbone to train: xlmr, mbert, or both (default: both)",
+    )
+    args = parser.parse_args()
+    log_dir = args.log_dir
+    os.makedirs(log_dir, exist_ok=True)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    use_amp = device.type == "cuda"
+
+    bundle = load_dataset("./data_preprocess/preprocessed_data.pkl", batch_size=256)
+
+    all_backbones = [
+        ("xlmr", "xlm-roberta-base"),
+        ("mbert", "bert-base-multilingual-cased"),
+    ]
+    backbones = all_backbones if args.backbone == "both" else [b for b in all_backbones if b[0] == args.backbone]
+
+    num_epochs = 5
+    lr = 1e-5
+    save_dir = "./checkpoints"
+    os.makedirs(save_dir, exist_ok=True)
+
+    for model_name, backbone_name in backbones:
+        with open(os.path.join(log_dir, f"training_results_{model_name}.txt"), "w") as log_file:
+            def log_fn(msg: str, _f=log_file) -> None:
+                print(msg)
+                _f.write(msg + "\n")
+                _f.flush()
+
+            log_fn(f"\n=== Training {model_name} ({backbone_name}) ===")
+            writer = SummaryWriter(log_dir=os.path.join("runs", model_name))
+
+            criterion = MultiTaskLoss()
+            criterion.lambda_dur = 0.5
+
+            model = DualHeadCausalModel(backbone_name=backbone_name).to(device)
+
+            # torch.compile: must come after .to(device) and before AdamW
+            # if hasattr(torch, "compile"):
+            #     try:
+            #         model = torch.compile(model)
+            #         log_fn("[info] torch.compile enabled")
+            #     except Exception as e:
+            #         log_fn(f"[warn] torch.compile skipped: {e}")
+
+            optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+            scaler = torch.amp.GradScaler() if use_amp else None
+
+            train(
+                model=model,
+                loader=bundle.loader,
+                optimizer=optimizer,
+                criterion=criterion,
+                num_epochs=num_epochs,
+                device=device,
+                writer=writer,
+                model_name=model_name,
+                save_dir=save_dir,
+                log_fn=log_fn,
+                use_amp=use_amp,
+                scaler=scaler,
+            )
+
+            writer.close()
+
+
+# Usage examples:
+#   Run both backbones with default settings:
+#     python training/train.py
+#
+#   Run a single backbone:
+#     python training/train.py --backbone xlmr
+#     python training/train.py --backbone mbert
+#
+#   Save logs to a custom directory (created if absent):
+#     python training/train.py --log-dir ./logs/run1
+#
+#   Combine options:
+#     python training/train.py --backbone xlmr --log-dir ./logs/xlmr_run1
+if __name__ == "__main__":
+    main()
