@@ -222,7 +222,7 @@ def main() -> None:
                 _f.flush()
 
             log_fn(f"\n=== Training {model_name} ({backbone_name}) ===")
-            writer = SummaryWriter(log_dir=os.path.join("runs", model_name))
+            writer = SummaryWriter(log_dir=os.path.join(log_dir, "tensorboard", model_name))
 
             criterion = MultiTaskLoss()
             criterion.lambda_dur = 0.5
