@@ -16,17 +16,17 @@ def main():
     Preprocess the SwitchLingua dataset using a selected tokenizer model.
 
     Usage:
-        python3 preprocess.py --model xlmr   # xlm-roberta-base  → preprocessed_data_xlmr.pkl
-        python3 preprocess.py --model mbert  # bert-base-multilingual-cased → preprocessed_data_mbert.pkl
-        python3 preprocess.py                # defaults to xlmr
+        python preprocess.py --model xlmr   # xlm-roberta-base  → preprocessed_data_xlmr.pkl
+        python preprocess.py --model mbert  # bert-base-multilingual-cased → preprocessed_data_mbert.pkl
+        python preprocess.py                # defaults to xlmr
     """
     parser = argparse.ArgumentParser(
         description="Preprocess SwitchLingua dataset for code-switching prediction.",
         epilog=(
             "Examples:\n"
-            "  python3 preprocess.py --model xlmr   # uses xlm-roberta-base  → preprocessed_data_xlmr.pkl\n"
-            "  python3 preprocess.py --model mbert  # uses bert-base-multilingual-cased → preprocessed_data_mbert.pkl\n"
-            "  python3 preprocess.py                # defaults to xlmr"
+            "  python preprocess.py --model xlmr   # uses xlm-roberta-base  → preprocessed_data_xlmr.pkl\n"
+            "  python preprocess.py --model mbert  # uses bert-base-multilingual-cased → preprocessed_data_mbert.pkl\n"
+            "  python preprocess.py                # defaults to xlmr"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -40,7 +40,7 @@ def main():
 
     model_key = args.model
     model_name = MODEL_CONFIGS[model_key]
-    output_path = f"./preprocessed_data_{model_key}.pkl"
+    output_path = f"./data_preprocess/preprocessed_data_{model_key}.pkl"
 
     print(f"Model: {model_name}")
     print(f"Output: {output_path}")
