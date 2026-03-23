@@ -138,17 +138,19 @@ def train(
 
         global_step = epoch + 1
 
-        writer.add_scalars("Loss", {
-            "total": avg_loss, "switch": avg_Lsw, "duration": avg_Ldur
-        }, global_step)
+        writer.add_scalar("Loss/total", avg_loss, global_step)
+        writer.add_scalar("Loss/switch", avg_Lsw, global_step)
+        writer.add_scalar("Loss/duration", avg_Ldur, global_step)
 
-        writer.add_scalars("Switch/Classification", {
-            "F1": sw_f1, "Accuracy": sw_acc, "Bal_Acc": sw_bal_acc, "AUPRC": sw_auprc,
-        }, global_step)
+        writer.add_scalar("Switch/F1", sw_f1, global_step)
+        writer.add_scalar("Switch/Accuracy", sw_acc, global_step)
+        writer.add_scalar("Switch/BalAcc", sw_bal_acc, global_step)
+        writer.add_scalar("Switch/AUPRC", sw_auprc, global_step)
 
-        writer.add_scalars("Duration/Classification", {
-            "F1": dur_f1, "Accuracy": dur_acc, "Bal_Acc": dur_bal_acc, "AUPRC": dur_auprc,
-        }, global_step)
+        writer.add_scalar("Duration/F1", dur_f1, global_step)
+        writer.add_scalar("Duration/Accuracy", dur_acc, global_step)
+        writer.add_scalar("Duration/BalAcc", dur_bal_acc, global_step)
+        writer.add_scalar("Duration/AUPRC", dur_auprc, global_step)
 
         log_fn(
             f"Epoch {epoch+1}/{num_epochs} | "
