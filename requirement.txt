@@ -11,3 +11,6 @@ huggingface_hub
 transformers
 ipywidgets
 pytest
+tensorboard
+tqdm
+markupsafe==2.0.1
