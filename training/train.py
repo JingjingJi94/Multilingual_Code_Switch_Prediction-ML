@@ -81,7 +81,7 @@ def run_epoch(
 
         all_dur_preds.extend(dur_logits_f.argmax(dim=-1).cpu().numpy())
         all_dur_labels.extend(ydur.cpu().numpy())
-        all_dur_probs.extend(dur_probs[:, 1].cpu().numpy())
+        all_dur_probs.extend(dur_probs.cpu().numpy())
 
     return {
         "avg_loss": total_loss / num_batches,
@@ -124,10 +124,15 @@ def train(
         sw_bal_acc = balanced_accuracy_score(results["sw_labels"], results["sw_preds"])
         sw_auprc = average_precision_score(results["sw_labels"], results["sw_probs"])
 
-        dur_f1 = f1_score(results["dur_labels"], results["dur_preds"], average="macro", zero_division=0)
-        dur_acc = accuracy_score(results["dur_labels"], results["dur_preds"])
-        dur_bal_acc = balanced_accuracy_score(results["dur_labels"], results["dur_preds"])
-        dur_auprc = average_precision_score(results["dur_labels"], results["dur_probs"])
+        dur_valid = results["dur_labels"] != -1
+        dur_labels_v = results["dur_labels"][dur_valid]
+        dur_preds_v = results["dur_preds"][dur_valid]
+        dur_probs_v = results["dur_probs"][dur_valid]  # shape (N_valid, 3)
+
+        dur_f1 = f1_score(dur_labels_v, dur_preds_v, average="macro", zero_division=0)
+        dur_acc = accuracy_score(dur_labels_v, dur_preds_v)
+        dur_bal_acc = balanced_accuracy_score(dur_labels_v, dur_preds_v)
+        dur_auprc = average_precision_score(dur_labels_v, dur_probs_v, average="macro")
 
         epoch_bar.set_postfix(loss=f"{avg_loss:.4f}", sw_f1=f"{sw_f1:.4f}", dur_f1=f"{dur_f1:.4f}")
 
@@ -204,7 +209,7 @@ def main() -> None:
     ]
     backbones = all_backbones if args.backbone == "both" else [b for b in all_backbones if b[0] == args.backbone]
 
-    num_epochs = 5
+    num_epochs = 2 if args.debug else 5
     lr = 1e-5
     save_dir = "./checkpoints"
     os.makedirs(save_dir, exist_ok=True)
