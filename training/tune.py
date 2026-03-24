@@ -8,12 +8,12 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 import matplotlib.pyplot as plt
-from tqdm import tqdm
 
 from data.data_utils import split_entries
 from data.streaming_dataloader import SwitchLinguaStreamDataset
 from models.dual_head_model import DualHeadCausalModel
 from training.losses import MultiTaskLoss
+from training.train import run_epoch, eval_epoch, _compute_metrics
 
 # ---------------------------
 # CLI arguments
@@ -39,6 +39,8 @@ parser.add_argument("--subset", type=int, default=50000,
     help="Max number of train windows to use (default: 50000)")
 parser.add_argument("--subset-val", type=int, default=5000,
     help="Max number of val windows to use (default: 5000)")
+parser.add_argument("--sample-rate", type=float, default=0.2,
+    help="Fraction of training positions sampled per epoch (default: 0.2)")
 args = parser.parse_args()
 
 runs = [(float(p.split(",")[0]), float(p.split(",")[1])) for p in args.runs.split()]
@@ -57,9 +59,10 @@ print(f"Runs     : {runs}")
 print(f"Log dir  : {args.log_dir}")
 
 # ---------------------------
-# Device
+# Device / AMP
 # ---------------------------
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+use_amp = device.type == "cuda"
 
 # ---------------------------
 # Load & split dataset (once)
@@ -73,7 +76,7 @@ train_entries, val_entries, _ = split_entries(all_entries)
 print(f"Split: {len(train_entries)} train / {len(val_entries)} val sequences")
 
 tokenizer = AutoTokenizer.from_pretrained(backbone_name)
-train_ds = SwitchLinguaStreamDataset(train_entries, tokenizer=tokenizer)
+train_ds = SwitchLinguaStreamDataset(train_entries, tokenizer=tokenizer, sample_rate=args.sample_rate)
 val_ds   = SwitchLinguaStreamDataset(val_entries,   tokenizer=tokenizer)
 
 if args.subset < len(train_ds):
@@ -86,8 +89,8 @@ if args.subset_val < len(val_ds):
     val_ds = torch.utils.data.Subset(val_ds, indices)
     print(f"Subset val:   {len(val_ds)} windows")
 
-train_loader = DataLoader(train_ds, batch_size=128, shuffle=True)
-val_loader   = DataLoader(val_ds,   batch_size=128, shuffle=False)
+train_loader = DataLoader(train_ds, batch_size=128, shuffle=True,  pin_memory=False)
+val_loader   = DataLoader(val_ds,   batch_size=128, shuffle=False, pin_memory=False)
 print(f"Train windows: {len(train_ds)} | Val windows: {len(val_ds)}")
 
 # ---------------------------
@@ -100,66 +103,47 @@ for lr, lambda_dur in runs:
     model     = DualHeadCausalModel(backbone_name=backbone_name).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     criterion = MultiTaskLoss(lambda_sw=1.0, lambda_dur=lambda_dur)
+    scaler    = torch.amp.GradScaler() if use_amp else None
 
     train_L_sw_list, train_L_dur_list = [], []
     val_L_sw_list,   val_L_dur_list   = [], []
 
     with open(log_path, "w") as log_file:
-        print(f"\n=== lr={lr}  λ_dur={lambda_dur}  backbone={args.backbone} ===")
-        log_file.write(f"lr={lr}  lambda_dur={lambda_dur}  backbone={args.backbone}\n\n")
+        def log_fn(msg: str, _f=log_file) -> None:
+            print(msg)
+            _f.write(msg + "\n")
+            _f.flush()
+
+        log_fn(f"\n=== lr={lr}  λ_dur={lambda_dur}  backbone={args.backbone} ===")
 
         for epoch in range(num_epochs):
-            # Training
-            model.train()
-            epoch_L_sw, epoch_L_dur = 0.0, 0.0
+            results = run_epoch(model, train_loader, optimizer, criterion, device, scaler, use_amp)
+            m = _compute_metrics(results)
 
-            for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} [train]"):
-                input_ids, _, attention_mask, ysw, ydur = batch
-                input_ids      = input_ids.to(device)
-                attention_mask = attention_mask.to(device)
-                ysw            = ysw.to(device)
-                ydur           = ydur.to(device)
+            train_L_sw_list.append(results["avg_Lsw"])
+            train_L_dur_list.append(results["avg_Ldur"])
 
-                optimizer.zero_grad()
-                switch_logits, duration_logits = model(input_ids, attention_mask)
-                loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
-                loss.backward()
-                optimizer.step()
-
-                epoch_L_sw  += L_sw.item()
-                epoch_L_dur += L_dur.item()
-
-            train_L_sw_list.append(epoch_L_sw  / len(train_loader))
-            train_L_dur_list.append(epoch_L_dur / len(train_loader))
-
-            # Validation
-            model.eval()
-            val_epoch_L_sw, val_epoch_L_dur = 0.0, 0.0
-
-            with torch.no_grad():
-                for batch in tqdm(val_loader, desc=f"Epoch {epoch+1}/{num_epochs} [val]", leave=False):
-                    input_ids, _, attention_mask, ysw, ydur = batch
-                    input_ids      = input_ids.to(device)
-                    attention_mask = attention_mask.to(device)
-                    ysw            = ysw.to(device)
-                    ydur           = ydur.to(device)
-
-                    switch_logits, duration_logits = model(input_ids, attention_mask)
-                    _, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
-                    val_epoch_L_sw  += L_sw.item()
-                    val_epoch_L_dur += L_dur.item()
-
-            val_L_sw_list.append(val_epoch_L_sw  / len(val_loader))
-            val_L_dur_list.append(val_epoch_L_dur / len(val_loader))
-
-            msg = (
-                f"Epoch {epoch+1}/{num_epochs}: "
-                f"Train L_sw={train_L_sw_list[-1]:.4f}, L_dur={train_L_dur_list[-1]:.4f} | "
-                f"Val L_sw={val_L_sw_list[-1]:.4f}, L_dur={val_L_dur_list[-1]:.4f}"
+            log_fn(
+                f"Epoch {epoch+1}/{num_epochs} [train] | "
+                f"Loss {results['avg_loss']:.4f} (sw {results['avg_Lsw']:.4f}, dur {results['avg_Ldur']:.4f})\n"
+                f"  Switch   — F1 {m['sw_f1']:.4f}  Acc {m['sw_acc']:.4f}\n"
+                f"  Duration — F1 {m['dur_f1']:.4f}  Acc {m['dur_acc']:.4f}"
             )
-            print(msg)
-            log_file.write(msg + "\n")
-            log_file.flush()
+
+            val_results = eval_epoch(model, val_loader, criterion, device)
+            vm = _compute_metrics(val_results)
+
+            val_L_sw_list.append(val_results["avg_Lsw"])
+            val_L_dur_list.append(val_results["avg_Ldur"])
+
+            log_fn(
+                f"Epoch {epoch+1}/{num_epochs} [val]   | Loss {val_results['avg_loss']:.4f}\n"
+                f"  Switch   — F1 {vm['sw_f1']:.4f}  Acc {vm['sw_acc']:.4f}\n"
+                f"  Duration — F1 {vm['dur_f1']:.4f}  Acc {vm['dur_acc']:.4f}"
+            )
+
+            if hasattr(train_loader.dataset, "resample"):
+                train_loader.dataset.resample()
 
     # Loss curve plot
     epochs_range = range(1, num_epochs + 1)
