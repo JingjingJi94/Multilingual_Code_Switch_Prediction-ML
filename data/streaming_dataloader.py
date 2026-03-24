@@ -123,9 +123,10 @@ class SwitchLinguaStreamDataset(Dataset):
                 }
             )
 
+            seq_idx = len(self._seqs) - 1  # dense index into _seqs, not the raw loop index i
             max_t = (L - 2) if drop_last_token else (L - 1)
             for t in range(0, max_t + 1):
-                self._all_indices.append(StreamSampleIndex(seq_idx=i, t=t))
+                self._all_indices.append(StreamSampleIndex(seq_idx=seq_idx, t=t))
 
         self._index: List[StreamSampleIndex] = []
         self.resample()

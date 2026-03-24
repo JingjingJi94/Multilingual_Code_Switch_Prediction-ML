@@ -268,6 +268,8 @@ def main() -> None:
         help="Loss weight for switch head (default: 1.0)")
     parser.add_argument("--lambda-dur", type=float, default=0.5,
         help="Loss weight for duration head (default: 0.5)")
+    parser.add_argument("--sample-rate", type=float, default=0.2,
+        help="Fraction of training positions sampled per epoch (default: 0.2)")
     args = parser.parse_args()
     log_dir = args.log_dir
     os.makedirs(log_dir, exist_ok=True)
@@ -310,7 +312,7 @@ def main() -> None:
             val_entries = val_entries[:max(1, len(val_entries) // 100)]
             print(f"[debug] Using {len(train_entries)} train / {len(val_entries)} val sequences (1%)")
 
-        train_ds = SwitchLinguaStreamDataset(train_entries, tokenizer=tokenizer, sample_rate=0.2)
+        train_ds = SwitchLinguaStreamDataset(train_entries, tokenizer=tokenizer, sample_rate=args.sample_rate)
         val_ds = SwitchLinguaStreamDataset(val_entries, tokenizer=tokenizer)
         train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, pin_memory=False)
         val_loader = DataLoader(val_ds, batch_size=128, shuffle=False, pin_memory=False)
