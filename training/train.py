@@ -285,7 +285,7 @@ def main() -> None:
 
     num_epochs = args.epochs if args.epochs is not None else (2 if args.debug else 5)
     lr = args.lr
-    save_dir = "./checkpoints"
+    save_dir = os.path.join(log_dir, "checkpoints")
     os.makedirs(save_dir, exist_ok=True)
 
     for model_name, backbone_name in backbones:
