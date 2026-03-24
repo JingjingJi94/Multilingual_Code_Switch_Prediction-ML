@@ -9,4 +9,4 @@ rsync -avz --progress \
     --exclude 'logs/' \
     --exclude 'runs/' \
     ./ \
-    ec2-user@ec2-52-39-93-173.us-west-2.compute.amazonaws.com:/home/ec2-user/project/Multilingual_Code_Switch_Prediction-ML/
+    ec2-user@ec2-34-222-225-147.us-west-2.compute.amazonaws.com:/home/ec2-user/project/Multilingual_Code_Switch_Prediction-ML/
