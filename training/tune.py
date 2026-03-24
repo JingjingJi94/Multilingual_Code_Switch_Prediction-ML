@@ -31,7 +31,7 @@ parser.add_argument("--runs", type=str, required=True,
     help="Space-separated lr,lambda_dur pairs e.g. '1e-5,0.1 2e-5,0.5'")
 parser.add_argument("--backbone", choices=["xlmr", "mbert"], default="xlmr",
     help="Backbone model (default: xlmr)")
-parser.add_argument("--epochs", type=int, default=10,
+parser.add_argument("--epochs", type=int, default=5,
     help="Number of training epochs per run (default: 10)")
 parser.add_argument("--log-dir", default=".",
     help="Directory for log files and loss curve plots (default: .)")
@@ -89,16 +89,18 @@ if args.subset_val < len(val_ds):
     val_ds = torch.utils.data.Subset(val_ds, indices)
     print(f"Subset val:   {len(val_ds)} windows")
 
-train_loader = DataLoader(train_ds, batch_size=128, shuffle=True,  pin_memory=False)
-val_loader   = DataLoader(val_ds,   batch_size=128, shuffle=False, pin_memory=False)
+train_loader = DataLoader(train_ds, batch_size=128, shuffle=True,  pin_memory=True)
+val_loader   = DataLoader(val_ds,   batch_size=128, shuffle=False, pin_memory=True)
 print(f"Train windows: {len(train_ds)} | Val windows: {len(val_ds)}")
 
 # ---------------------------
 # Sweep over (lr, lambda_dur)
 # ---------------------------
 for lr, lambda_dur in runs:
-    log_path  = os.path.join(args.log_dir, f"tune_lr{lr}_ldur{lambda_dur}.txt")
-    plot_path = os.path.join(args.log_dir, f"loss_curve_lr{lr}_ldur{lambda_dur}.png")
+    run_dir   = os.path.join(args.log_dir, f"tune_lr{lr}_ldur{lambda_dur}")
+    os.makedirs(run_dir, exist_ok=True)
+    log_path  = os.path.join(run_dir, "log.txt")
+    plot_path = os.path.join(run_dir, "plot.png")
 
     model     = DualHeadCausalModel(backbone_name=backbone_name).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -159,6 +161,6 @@ for lr, lambda_dur in runs:
     plt.tight_layout()
     plt.savefig(plot_path)
     plt.close()
-    print(f"Saved: {log_path} | {plot_path}")
+    print(f"Saved: {run_dir}/")
 
 print(f"\nAll runs done. Logs saved under {args.log_dir}")

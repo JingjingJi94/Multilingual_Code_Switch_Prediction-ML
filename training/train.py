@@ -287,7 +287,7 @@ def main() -> None:
     ]
     backbones = all_backbones if args.backbone == "both" else [b for b in all_backbones if b[0] == args.backbone]
 
-    num_epochs = args.epochs if args.epochs is not None else (2 if args.debug else 5)
+    num_epochs = args.epochs if args.epochs is not None else (2 if args.debug else 10)
     lr = args.lr
     save_dir = os.path.join(log_dir, "checkpoints")
     os.makedirs(save_dir, exist_ok=True)
