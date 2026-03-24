@@ -41,6 +41,9 @@ parser = argparse.ArgumentParser(description="Evaluate XLM-R and mBERT on the te
 parser.add_argument("--xlmr-checkpoint", type=str, required=True, help="Path to XLM-R .pt checkpoint")
 parser.add_argument("--mbert-checkpoint", type=str, required=True, help="Path to mBERT .pt checkpoint")
 parser.add_argument("--results-dir", default="results", help="Directory to save eval_results.json (default: results/)")
+parser.add_argument("--test-entries", type=str,
+    default="checkpoints/xlmr_lr1e-5_dur0.5/xlmr_test_entries.pkl",
+    help="Path to test entries .pkl (default: checkpoints/xlmr_lr1e-5_dur0.5/xlmr_test_entries.pkl)")
 args = parser.parse_args()
 
 os.makedirs(args.results_dir, exist_ok=True)
@@ -48,9 +51,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
 
 # Load test entries (both models share the same seed=42 split — use xlmr's)
-test_pkl = "checkpoints/xlmr_test_entries.pkl"
-print(f"\nLoading test entries: {test_pkl}")
-with open(test_pkl, "rb") as f:
+print(f"\nLoading test entries: {args.test_entries}")
+with open(args.test_entries, "rb") as f:
     test_entries = pickle.load(f)
 print(f"Test sequences: {len(test_entries)}")
 

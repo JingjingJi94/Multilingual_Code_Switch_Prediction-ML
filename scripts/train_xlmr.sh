@@ -1,22 +1,21 @@
 #!/usr/bin/env bash
-# Hyperparameter sweep for XLM-R — part 2 of 2 (7 runs)
-# Run in parallel with tune_xlmr_part1.sh
-# Usage: bash scripts/tune_xlmr_part2.sh [--debug]
+# Training script for XLM-R
+# Usage: bash scripts/train_xlmr.sh [--debug]
 
 set -euo pipefail
 
 EXTRA_ARGS="$@"
 
 RUNS=(
-    "2e-5 1"
+    "1e-5 0.1"
 )
 
 for RUN in "${RUNS[@]}"; do
     LR=$(echo "$RUN" | awk '{print $1}')
     LDUR=$(echo "$RUN" | awk '{print $2}')
-    RUN_DIR="logs/train_xlmr1/lr${LR}_ldur${LDUR}"
+    RUN_DIR="train_log/xlmr/lr${LR}_ldur${LDUR}"
     echo "=========================================="
-    echo " [xlmr train1] lr=${LR}  lambda-dur=${LDUR}"
+    echo " [xlmr train] lr=${LR}  lambda-dur=${LDUR}"
     echo " log-dir: ${RUN_DIR}"
     echo "=========================================="
     python3 training/train.py \
@@ -27,7 +26,7 @@ for RUN in "${RUNS[@]}"; do
         ${EXTRA_ARGS}
 done
 
-echo "[xlmr train1] Done. Logs saved under logs/train_xlmr1/"
+echo "[xlmr train] Done. Logs saved under train_log/"
 echo ""
 echo "View all runs with:"
-echo "  tensorboard --logdir logs/train_xlmr1"
+echo "  tensorboard --logdir train_log/"
