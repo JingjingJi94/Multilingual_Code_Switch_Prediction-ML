@@ -1,3 +1,4 @@
+import json
 import pickle
 import random
 from collections import Counter
@@ -16,6 +17,32 @@ class DataBundle:
     tokenizer: Any
     dataset: SwitchLinguaStreamDataset     # window-level
     loader: DataLoader
+
+
+def split_entries(entries, train_ratio=0.8, val_ratio=0.1, seed=42):
+    """
+    Split sequence-level entries into train / val / test by ratio.
+    test_ratio = 1 - train_ratio - val_ratio (default 0.1)
+    Split is at sequence level to prevent window leakage across splits.
+    """
+    import random as _random
+    rng = _random.Random(seed)
+    indices = list(range(len(entries)))
+    rng.shuffle(indices)
+
+    n = len(entries)
+    n_train = int(n * train_ratio)
+    n_val = int(n * val_ratio)
+
+    train_idx = indices[:n_train]
+    val_idx   = indices[n_train:n_train + n_val]
+    test_idx  = indices[n_train + n_val:]
+
+    return (
+        [entries[i] for i in train_idx],
+        [entries[i] for i in val_idx],
+        [entries[i] for i in test_idx],
+    )
 
 
 def load_dataset(
@@ -37,6 +64,7 @@ def load_dataset(
     with open(data_file, "rb") as f:
         entries = pickle.load(f)
     print(f"[load] Loaded {len(entries)} entries")
+    print(f"[load] Sample entry: {json.dumps(entries[0], indent=2, ensure_ascii=False) if entries else 'N/A'}")
 
     if not isinstance(entries, list):
         raise ValueError(f"Expected a list of dicts, got {type(entries)}")
@@ -199,7 +227,7 @@ def find_and_inspect_switch_samples(ds, tokenizer, max_find=5, scan_limit=200000
     print(f"found {found} switch samples")
 
 
-def demo(data_file: str = "./data_preprocess/preprocessed_data.pkl") -> None:
+def demo(data_file: str = "./data_preprocess/preprocessed_data_xlmr.pkl") -> None:
     bundle = load_dataset(data_file=data_file)
 
     ds = bundle.dataset
