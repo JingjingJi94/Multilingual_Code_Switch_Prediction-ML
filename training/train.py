@@ -236,6 +236,9 @@ def train(
             torch.save(model.state_dict(), best_dur_acc_ckpt_path)
             log_fn(f"  [best dur_acc] Val Duration Acc {best_val_dur_acc:.4f} → saved {best_dur_acc_ckpt_path}")
 
+        if hasattr(loader.dataset, "resample"):
+            loader.dataset.resample()
+
     final_ckpt_path = os.path.join(save_dir, f"{model_name}_final.pt")
     torch.save(model.state_dict(), final_ckpt_path)
     log_fn(f"Saved final checkpoint: {final_ckpt_path}")
@@ -307,7 +310,7 @@ def main() -> None:
             val_entries = val_entries[:max(1, len(val_entries) // 100)]
             print(f"[debug] Using {len(train_entries)} train / {len(val_entries)} val sequences (1%)")
 
-        train_ds = SwitchLinguaStreamDataset(train_entries, tokenizer=tokenizer)
+        train_ds = SwitchLinguaStreamDataset(train_entries, tokenizer=tokenizer, sample_rate=0.2)
         val_ds = SwitchLinguaStreamDataset(val_entries, tokenizer=tokenizer)
         train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, pin_memory=False)
         val_loader = DataLoader(val_ds, batch_size=128, shuffle=False, pin_memory=False)

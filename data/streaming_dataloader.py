@@ -51,7 +51,7 @@ class SwitchLinguaStreamDataset(Dataset):
         sequences: Sequence[Dict[str, Any]],
         tokenizer: Any,
         window_size: int = 64,
-        sample_rate=0.5,
+        sample_rate=1.0,
         lang2id: Optional[Dict[str, int]] = None,
         pad_token_id: Optional[int] = None,
         pad_lang_id: int = -1,
@@ -65,6 +65,7 @@ class SwitchLinguaStreamDataset(Dataset):
 
         self.tokenizer = tokenizer
         self.window_size = window_size
+        self.sample_rate = sample_rate
         self.pad_lang_id = pad_lang_id
         self.drop_last_token = drop_last_token
         self.enforce_equal_lengths = enforce_equal_lengths
@@ -78,7 +79,7 @@ class SwitchLinguaStreamDataset(Dataset):
         self.lang2id = lang2id or self._build_lang2id(sequences)
 
         self._seqs: List[Dict[str, torch.Tensor]] = []
-        self._index: List[StreamSampleIndex] = []
+        self._all_indices: List[StreamSampleIndex] = []
 
         for i, seq in enumerate(sequences):
             tokens = seq.get("tokens")
@@ -123,13 +124,21 @@ class SwitchLinguaStreamDataset(Dataset):
             )
 
             max_t = (L - 2) if drop_last_token else (L - 1)
-            all_t = list(range(0, max_t + 1))
-            k = max(1, int(len(all_t) * sample_rate))
-            sampled_t = random.sample(all_t, k)  # random sample
-            for t in sorted(sampled_t):
-                self._index.append(StreamSampleIndex(seq_idx=i, t=t))
-            # for t in range(0, max_t + 1):
-            #     self._index.append(StreamSampleIndex(seq_idx=i, t=t))
+            for t in range(0, max_t + 1):
+                self._all_indices.append(StreamSampleIndex(seq_idx=i, t=t))
+
+        self._index: List[StreamSampleIndex] = []
+        self.resample()
+
+    def resample(self) -> None:
+        """Draw a fresh random subset of positions (sample_rate fraction of all positions).
+        Call at the end of each training epoch for dynamic sampling.
+        When sample_rate == 1.0, uses all positions without random sampling."""
+        if self.sample_rate >= 1.0:
+            self._index = list(self._all_indices)
+        else:
+            k = max(1, int(len(self._all_indices) * self.sample_rate))
+            self._index = random.sample(self._all_indices, k)
 
     @staticmethod
     def _build_lang2id(sequences: Sequence[Dict[str, Any]]) -> Dict[str, int]:
