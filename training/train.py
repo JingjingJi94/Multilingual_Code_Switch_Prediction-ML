@@ -178,6 +178,8 @@ def train(
     """Full training loop over num_epochs. Logs train + val metrics and saves checkpoints."""
     best_val_sw_f1 = -1.0
     best_val_dur_acc = -1.0
+    best_sw_f1_state: Optional[dict] = None
+    best_dur_acc_state: Optional[dict] = None
     best_sw_f1_ckpt_path = os.path.join(save_dir, f"{model_name}_best_sw_f1.pt")
     best_dur_acc_ckpt_path = os.path.join(save_dir, f"{model_name}_best_dur_acc.pt")
 
@@ -228,22 +230,24 @@ def train(
 
         if vm["sw_f1"] > best_val_sw_f1:
             best_val_sw_f1 = vm["sw_f1"]
-            torch.save(model.state_dict(), best_sw_f1_ckpt_path)
-            log_fn(f"  [best sw_f1] Val Switch F1 {best_val_sw_f1:.4f} → saved {best_sw_f1_ckpt_path}")
+            best_sw_f1_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            log_fn(f"  [best sw_f1] Val Switch F1 {best_val_sw_f1:.4f} → updated in-memory checkpoint")
 
         if vm["dur_acc"] > best_val_dur_acc:
             best_val_dur_acc = vm["dur_acc"]
-            torch.save(model.state_dict(), best_dur_acc_ckpt_path)
-            log_fn(f"  [best dur_acc] Val Duration Acc {best_val_dur_acc:.4f} → saved {best_dur_acc_ckpt_path}")
+            best_dur_acc_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            log_fn(f"  [best dur_acc] Val Duration Acc {best_val_dur_acc:.4f} → updated in-memory checkpoint")
 
         if hasattr(loader.dataset, "resample"):
             loader.dataset.resample()
 
-    final_ckpt_path = os.path.join(save_dir, f"{model_name}_final.pt")
-    torch.save(model.state_dict(), final_ckpt_path)
-    log_fn(f"Saved final checkpoint: {final_ckpt_path}")
-    log_fn(f"Best checkpoint (val sw_f1={best_val_sw_f1:.4f}): {best_sw_f1_ckpt_path}")
-    log_fn(f"Best checkpoint (val dur_acc={best_val_dur_acc:.4f}): {best_dur_acc_ckpt_path}")
+    if best_sw_f1_state is not None:
+        torch.save(best_sw_f1_state, best_sw_f1_ckpt_path)
+        log_fn(f"Best checkpoint (val sw_f1={best_val_sw_f1:.4f}) saved: {best_sw_f1_ckpt_path}")
+
+    if best_dur_acc_state is not None:
+        torch.save(best_dur_acc_state, best_dur_acc_ckpt_path)
+        log_fn(f"Best checkpoint (val dur_acc={best_val_dur_acc:.4f}) saved: {best_dur_acc_ckpt_path}")
 
 
 def main() -> None:
