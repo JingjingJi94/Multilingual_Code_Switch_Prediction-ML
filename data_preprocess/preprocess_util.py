@@ -24,11 +24,25 @@ spanish_stopwords = {
     "de","la","el","y","los","las","en","un","una","por","para","con",
     "del","al","se","que","como","su","es","está","este","esta","son"
 }
-punctuation_chars = set(".,!?;:()[]{}“”‘’\"…")
+hardcode_english = {
+    "a","an","the","i","me","my","we","us","he","she","it","they","them",
+    "is","am","are","was","be","do","did","does","in","on","at","by","of","to","for",
+    "and","or","but","so",
+    "s","t","d","m",
+    "roamed","ancient"
+}
+
 def is_punctuation(token):
     """
-    Detect punctuation (ASCII + Unicode punctuation).
+    Detect punctuation (ASCII + Unicode + Arabic punctuation).
     """
+    arabic_punct = {"،", "؛", "؟"}  # comma, semicolon, question mark
+
+    # If it's explicitly Arabic punctuation
+    if token in arabic_punct:
+        return True
+
+    # General punctuation (no letters/digits)
     return bool(re.fullmatch(r"[^\w\s]+", token))
 
 def is_number(subword):
@@ -46,7 +60,7 @@ def is_spanish(word):
     - Contains Spanish accented characters or 'ñ'
     - Or matches a Spanish stopword
     """
-    word_lower = word.lower()
+    word_lower = word.lower().strip().lstrip('_')
     # check for accented characters
     if any(c in spanish_chars for c in word):
         return True
@@ -56,10 +70,19 @@ def is_spanish(word):
 
     return False
 
+def is_arabic(word):
+    """
+    Detect Arabic script.
+    """
+    return bool(re.search(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]', word))
 
-# Build a detector for English and Spanish
+# Build a detector for English, Arabic and Spanish
 detector = (
-    LanguageDetectorBuilder.from_languages(Language.ENGLISH, Language.SPANISH)
+    LanguageDetectorBuilder.from_languages(
+        Language.ENGLISH,
+        Language.SPANISH,
+        Language.ARABIC
+    )
     .build()
 )
 
@@ -69,11 +92,16 @@ def detect_word_lang(word):
     - Chinese / Hindi heuristics first
     - Spanish heuristic (accent + stopword)
     - Lingua fallback for short/ambiguous words
+    - Hardcode common English words to prevent misdetection
     """
-    word = word.strip()
+    word = word.strip().lstrip('▁').lower()
     if not word:
         return "en"
     
+    # Hardcode common English words
+    if word in hardcode_english:
+        return "en"
+
     # punctuation
     if is_punctuation(word):
         return "punct"
@@ -83,6 +111,8 @@ def detect_word_lang(word):
         return "zh"
     if is_hindi(word):
         return "hi"
+    if is_arabic(word):
+        return "ar"
 
     # Spanish heuristic
     if is_spanish(word):
@@ -93,6 +123,8 @@ def detect_word_lang(word):
         lang = detector.detect_language_of(word)
         if lang == Language.SPANISH:
             return "es"
+        elif lang == Language.ARABIC:
+            return "ar"
         elif lang == Language.ENGLISH:
             return "en"
         else:
@@ -116,6 +148,8 @@ def tokenize_with_lang_mapping(text, tokenizer, language_pair):
         allowed_langs = {"zh", "en"}
     elif language_pair == "Hindi-English":
         allowed_langs = {"hi", "en"}
+    elif language_pair == "Arabic-English":
+        allowed_langs = {"ar", "en"}
     else:
         allowed_langs = {"en"}
 
