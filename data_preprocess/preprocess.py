@@ -56,7 +56,7 @@ def main():
 
     # Create language pair column and filter to chosen pairs
     df["language_pair"] = df["first_language"] + "-" + df["second_language"]
-    chosen_pairs = [("Chinese", "English"), ("Hindi", "English"), ("Spanish", "English")]
+    chosen_pairs = [("Chinese", "English"), ("Hindi", "English"), ("Spanish", "English"), ("Arabic", "English")]
     df_filtered = df[
         df["language_pair"].isin([f"{l1}-{l2}" for l1, l2 in chosen_pairs])
     ].reset_index(drop=True)
