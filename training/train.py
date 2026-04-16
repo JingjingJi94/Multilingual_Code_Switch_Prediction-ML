@@ -274,6 +274,8 @@ def main() -> None:
         help="Loss weight for duration head (default: 0.5)")
     parser.add_argument("--sample-rate", type=float, default=0.2,
         help="Fraction of training positions sampled per epoch (default: 0.2)")
+    parser.add_argument("--window-size", type=int, default=64,
+        help="Context window size in tokens (default: 64)")
     args = parser.parse_args()
     log_dir = args.log_dir
     os.makedirs(log_dir, exist_ok=True)
@@ -316,8 +318,8 @@ def main() -> None:
             val_entries = val_entries[:max(1, len(val_entries) // 100)]
             print(f"[debug] Using {len(train_entries)} train / {len(val_entries)} val sequences (1%)")
 
-        train_ds = SwitchLinguaStreamDataset(train_entries, tokenizer=tokenizer, sample_rate=args.sample_rate)
-        val_ds = SwitchLinguaStreamDataset(val_entries, tokenizer=tokenizer)
+        train_ds = SwitchLinguaStreamDataset(train_entries, tokenizer=tokenizer, window_size=args.window_size, sample_rate=args.sample_rate)
+        val_ds = SwitchLinguaStreamDataset(val_entries, tokenizer=tokenizer, window_size=args.window_size)
         train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, pin_memory=False)
         val_loader = DataLoader(val_ds, batch_size=128, shuffle=False, pin_memory=False)
         print(f"[{model_name}] Train windows: {len(train_ds)} | Val windows: {len(val_ds)}")
@@ -388,5 +390,9 @@ def main() -> None:
 #     python3 training/train.py --epochs 10 --lr 2e-5
 #     python3 training/train.py --lambda-sw 1.0 --lambda-dur 0.3
 #     python3 training/train.py --debug --backbone xlmr --epochs 1 --lr 2e-5 --lambda-sw 1.0 --lambda-dur 0.3
+#
+#   Change context window size (default: 64):
+#     python3 training/train.py --window-size 128
+#     python3 training/train.py --backbone xlmr --window-size 32
 if __name__ == "__main__":
     main()

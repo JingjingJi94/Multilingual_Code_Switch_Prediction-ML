@@ -14,3 +14,4 @@ pytest
 tensorboard
 tqdm
 markupsafe==2.0.1
+tensorboard
