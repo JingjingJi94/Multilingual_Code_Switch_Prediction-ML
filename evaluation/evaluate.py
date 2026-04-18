@@ -7,8 +7,11 @@ then saves results to JSON for plotting.
 
 Usage:
     python3 evaluation/evaluate.py \
-        --xlmr-checkpoint checkpoints/xlmr_epoch5.pt \
-        --mbert-checkpoint checkpoints/mbert_epoch5.pt
+        --xlmr-checkpoint  checkpoints/xlmr_best_sw_f1.pt \
+        --mbert-checkpoint checkpoints/mbert_best_sw_f1.pt \
+        --test-entries      checkpoints/xlmr_test_entries.pkl \
+        --mbert-test-entries checkpoints/mbert_test_entries.pkl \
+        --results-dir results/best_sw_f1
 """
 import argparse
 import json
@@ -21,7 +24,6 @@ from collections import defaultdict
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from transformers import AutoTokenizer
 from tqdm import tqdm
 
@@ -32,35 +34,81 @@ from evaluation.metrics import (
 )
 
 BACKBONE_NAMES = {
-    "xlmr": "xlm-roberta-base",
+    "xlmr":  "xlm-roberta-base",
     "mbert": "bert-base-multilingual-cased",
 }
 WINDOW_SIZE = 64
 
+# ── Arguments ────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description="Evaluate XLM-R and mBERT on the test split.")
-parser.add_argument("--xlmr-checkpoint", type=str, required=True, help="Path to XLM-R .pt checkpoint")
-parser.add_argument("--mbert-checkpoint", type=str, required=True, help="Path to mBERT .pt checkpoint")
-parser.add_argument("--results-dir", default="results", help="Directory to save eval_results.json (default: results/)")
+parser.add_argument("--xlmr-checkpoint",  type=str, required=True,
+    help="Path to XLM-R .pt checkpoint")
+parser.add_argument("--mbert-checkpoint", type=str, required=True,
+    help="Path to mBERT .pt checkpoint")
 parser.add_argument("--test-entries", type=str,
-    default="checkpoints/xlmr_lr1e-5_dur0.5/xlmr_test_entries.pkl",
-    help="Path to test entries .pkl (default: checkpoints/xlmr_lr1e-5_dur0.5/xlmr_test_entries.pkl)")
+    default="checkpoints/xlmr_test_entries.pkl",
+    help="Path to XLM-R test entries .pkl")
+parser.add_argument("--mbert-test-entries", type=str,
+    default=None,
+    help="Path to mBERT test entries .pkl. If not set, falls back to --test-entries.")
+parser.add_argument("--results-dir", default="results",
+    help="Directory to save eval_results.json (default: results/)")
 args = parser.parse_args()
 
 os.makedirs(args.results_dir, exist_ok=True)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
 print(f"Device: {device}")
 
-# Load test entries (both models share the same seed=42 split — use xlmr's)
-print(f"\nLoading test entries: {args.test_entries}")
-with open(args.test_entries, "rb") as f:
-    test_entries = pickle.load(f)
-print(f"Test sequences: {len(test_entries)}")
+# ── Load test entries (each model uses its own pkl) ───────────────────────────
+xlmr_test_path  = args.test_entries
+mbert_test_path = args.mbert_test_entries or args.test_entries
+
+print(f"\nLoading XLM-R  test entries: {xlmr_test_path}")
+with open(xlmr_test_path, "rb") as f:
+    xlmr_test_entries = pickle.load(f)
+
+print(f"Loading mBERT  test entries: {mbert_test_path}")
+with open(mbert_test_path, "rb") as f:
+    mbert_test_entries = pickle.load(f)
+
+print(f"XLM-R  test sequences: {len(xlmr_test_entries)}")
+print(f"mBERT  test sequences: {len(mbert_test_entries)}")
+
+test_entries_map = {
+    "xlmr":  xlmr_test_entries,
+    "mbert": mbert_test_entries,
+}
+
+# ── Inference ─────────────────────────────────────────────────────────────────
+BATCH_SIZE = 128  # tune down to 64 if you get MPS out-of-memory errors
+
+def build_windows(input_ids, pad_id):
+    """Pre-build all sliding windows for one sequence as a 2-D list."""
+    L = len(input_ids)
+    windows = []
+    for t in range(L - 1):
+        start = t - WINDOW_SIZE + 1
+        if start >= 0:
+            window = input_ids[start:t + 1]
+        else:
+            window = [pad_id] * (-start) + input_ids[0:t + 1]
+        window = window[-WINDOW_SIZE:]
+        if len(window) < WINDOW_SIZE:
+            window = [pad_id] * (WINDOW_SIZE - len(window)) + window
+        windows.append(window)
+    return windows  # shape: (L-1, WINDOW_SIZE)
 
 
 def run_inference(entries, backbone_key, checkpoint_path):
     """
-    Run model inference over all entries, collecting predictions per language pair.
-    Returns a dict: {language_pair -> {"ysw_true": [...], "ysw_pred": [...], "ydur_true": [...], "ydur_pred": [...]}}
+    Batched inference over all entries.
+    Returns a dict: {language_pair -> {"ysw_true": [...], "ysw_pred": [...],
+                                       "ydur_true": [...], "ydur_pred": [...]}}
     """
     backbone_name = BACKBONE_NAMES[backbone_key]
     tokenizer = AutoTokenizer.from_pretrained(backbone_name)
@@ -75,46 +123,35 @@ def run_inference(entries, backbone_key, checkpoint_path):
 
     with torch.no_grad():
         for entry in tqdm(entries, desc=f"  [{backbone_key}] inference"):
-            pair = entry.get("language_pair", "UNK")
+            pair      = entry.get("language_pair", "UNK")
             input_ids = entry["input_ids"]
-            ysw = entry["ysw"]
-            ydur = entry["ydur"]
-            L = len(input_ids)
+            ysw       = entry["ysw"]
+            ydur      = entry["ydur"]
 
-            for t in range(L - 1):  # predict switch at t+1, label is ysw[t]
-                # Build left-padded window ending at t
-                start = t - WINDOW_SIZE + 1
-                if start >= 0:
-                    window = input_ids[start:t + 1]
-                    pad_len = 0
-                else:
-                    window = input_ids[0:t + 1]
-                    pad_len = -start
+            windows = build_windows(input_ids, pad_id)  # (L-1, WINDOW_SIZE)
+            n = len(windows)
 
-                if pad_len > 0:
-                    window = [pad_id] * pad_len + window
+            sw_preds, dur_preds = [], []
+            for i in range(0, n, BATCH_SIZE):
+                batch = windows[i:i + BATCH_SIZE]
+                ids_tensor = torch.tensor(batch, dtype=torch.long).to(device)   # (B, W)
+                attn_mask  = (ids_tensor != pad_id).long()                       # (B, W)
 
-                window = window[-WINDOW_SIZE:]  # ensure exact length
-                if len(window) < WINDOW_SIZE:
-                    window = [pad_id] * (WINDOW_SIZE - len(window)) + window
+                switch_logits, dur_logits = model(ids_tensor, attn_mask)         # (B,2), (B,3)
+                sw_preds.extend(switch_logits.argmax(dim=-1).cpu().tolist())
+                dur_preds.extend(dur_logits.argmax(dim=-1).cpu().tolist())
 
-                ids_tensor = torch.tensor(window, dtype=torch.long).unsqueeze(0).to(device)
-                attn_mask = (ids_tensor != pad_id).long()
-
-                switch_logits, dur_logits = model(ids_tensor, attn_mask)
-                sw_pred = int(switch_logits.argmax(dim=-1).item())
-                dur_pred = int(dur_logits.argmax(dim=-1).item())
-
-                pair_data[pair]["ysw_true"].append(ysw[t])
-                pair_data[pair]["ysw_pred"].append(sw_pred)
-                pair_data[pair]["ydur_true"].append(ydur[t])
-                pair_data[pair]["ydur_pred"].append(dur_pred)
+            pair_data[pair]["ysw_true"].extend(ysw[:n])
+            pair_data[pair]["ysw_pred"].extend(sw_preds)
+            pair_data[pair]["ydur_true"].extend(ydur[:n])
+            pair_data[pair]["ydur_pred"].extend(dur_preds)
 
     return pair_data
 
 
+# ── Metrics ───────────────────────────────────────────────────────────────────
 def compute_pair_metrics(pair_data):
-    """Compute metrics per language pair from collected predictions."""
+    """Compute metrics per language pair and overall from collected predictions."""
     per_pair = {}
     for pair, d in sorted(pair_data.items()):
         per_pair[pair] = {
@@ -124,9 +161,9 @@ def compute_pair_metrics(pair_data):
             "duration_accuracy":       duration_accuracy(d["ydur_true"], d["ydur_pred"]),
             "n_tokens":                len(d["ysw_true"]),
         }
-    # Overall across all pairs
-    all_ysw_true = sum((d["ysw_true"] for d in pair_data.values()), [])
-    all_ysw_pred = sum((d["ysw_pred"] for d in pair_data.values()), [])
+
+    all_ysw_true  = sum((d["ysw_true"]  for d in pair_data.values()), [])
+    all_ysw_pred  = sum((d["ysw_pred"]  for d in pair_data.values()), [])
     all_ydur_true = sum((d["ydur_true"] for d in pair_data.values()), [])
     all_ydur_pred = sum((d["ydur_pred"] for d in pair_data.values()), [])
 
@@ -141,20 +178,20 @@ def compute_pair_metrics(pair_data):
     return per_pair, overall, sigma
 
 
-# Run inference for both models
+# ── Run inference for both models ─────────────────────────────────────────────
 results = {}
 for backbone_key, checkpoint in [("xlmr", args.xlmr_checkpoint), ("mbert", args.mbert_checkpoint)]:
     print(f"\n=== {backbone_key.upper()} ===")
-    pair_data = run_inference(test_entries, backbone_key, checkpoint)
+    pair_data            = run_inference(test_entries_map[backbone_key], backbone_key, checkpoint)
     per_pair, overall, sigma = compute_pair_metrics(pair_data)
     results[backbone_key] = {"per_pair": per_pair, "overall": overall, "universality_sigma": sigma}
 
-# Print comparison table
+
+# ── Print comparison table ────────────────────────────────────────────────────
 print(f"\n{'='*80}")
 print("RESULTS — Anticipatory F1 / Precision / Recall / Duration Accuracy")
 print(f"{'='*80}")
-header = f"{'Language Pair':<22} {'Model':<8} {'F1':>6} {'Prec':>6} {'Rec':>6} {'DurAcc':>8}"
-print(header)
+print(f"{'Language Pair':<22} {'Model':<8} {'F1':>6} {'Prec':>6} {'Rec':>6} {'DurAcc':>8}")
 print("-" * 60)
 
 all_pairs = sorted({p for r in results.values() for p in r["per_pair"]})
@@ -179,7 +216,7 @@ for model_key in ["xlmr", "mbert"]:
           f"{o['duration_accuracy']:>8.4f}  "
           f"σ={s:.4f}")
 
-# Save JSON for plotting
+# ── Save JSON ─────────────────────────────────────────────────────────────────
 out_path = os.path.join(args.results_dir, "eval_results.json")
 with open(out_path, "w") as f:
     json.dump(results, f, indent=2)
