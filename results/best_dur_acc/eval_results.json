@@ -1,0 +1,68 @@
+{
+  "xlmr": {
+    "per_pair": {
+      "Chinese-English": {
+        "anticipatory_f1": 0.6714272635722787,
+        "anticipatory_precision": 0.6851644245142003,
+        "anticipatory_recall": 0.6582301202656614,
+        "duration_accuracy": 0.7278765033207683,
+        "n_tokens": 69898
+      },
+      "Hindi-English": {
+        "anticipatory_f1": 0.6952915997859818,
+        "anticipatory_precision": 0.6984681537221177,
+        "anticipatory_recall": 0.6921438082556591,
+        "duration_accuracy": 0.6620505992010652,
+        "n_tokens": 67857
+      },
+      "Spanish-English": {
+        "anticipatory_f1": 0.6224572823433686,
+        "anticipatory_precision": 0.6694865810968494,
+        "anticipatory_recall": 0.5816016218955905,
+        "duration_accuracy": 0.6206284845413077,
+        "n_tokens": 59088
+      }
+    },
+    "overall": {
+      "anticipatory_f1": 0.6550215705795396,
+      "anticipatory_precision": 0.6815242639211501,
+      "anticipatory_recall": 0.6305029620164944,
+      "duration_accuracy": 0.6643628760599373,
+      "n_tokens": 196843
+    },
+    "universality_sigma": 0.030317584559701405
+  },
+  "mbert": {
+    "per_pair": {
+      "Chinese-English": {
+        "anticipatory_f1": 0.6297317162807792,
+        "anticipatory_precision": 0.6711711711711712,
+        "anticipatory_recall": 0.5931118033921772,
+        "duration_accuracy": 0.77466251298027,
+        "n_tokens": 91493
+      },
+      "Hindi-English": {
+        "anticipatory_f1": 0.6653369425844138,
+        "anticipatory_precision": 0.718019680196802,
+        "anticipatory_recall": 0.6198566498539952,
+        "duration_accuracy": 0.6408282452880276,
+        "n_tokens": 79284
+      },
+      "Spanish-English": {
+        "anticipatory_f1": 0.5891240930510884,
+        "anticipatory_precision": 0.7179580674567001,
+        "anticipatory_recall": 0.49949264332825977,
+        "duration_accuracy": 0.6191019786910198,
+        "n_tokens": 61725
+      }
+    },
+    "overall": {
+      "anticipatory_f1": 0.6203632642619595,
+      "anticipatory_precision": 0.7007151628982157,
+      "anticipatory_recall": 0.5565436915485685,
+      "duration_accuracy": 0.6753686384761031,
+      "n_tokens": 232502
+    },
+    "universality_sigma": 0.03113609844695606
+  }
+}

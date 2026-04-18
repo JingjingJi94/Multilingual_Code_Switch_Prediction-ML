@@ -19,7 +19,7 @@ def _make_dummy_entry():
     return {
         "original_text": "A B C D E",
         "tokens": ["A", "B", "C", "D", "E"],
-        "input_ids": [10, 11, 12, 13, 14],   # 这里要补上
+        "input_ids": [10, 11, 12, 13, 14],   
         "lang_ids": ["en", "en", "es", "es", "en"],
         "ysw": [0, 1, 0, 1, 0],
         "ydur": [-1, 0, -1, 0, -1],
