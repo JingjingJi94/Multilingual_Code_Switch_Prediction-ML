@@ -13,7 +13,7 @@ RUNS=(
 for RUN in "${RUNS[@]}"; do
     LR=$(echo "$RUN" | awk '{print $1}')
     LDUR=$(echo "$RUN" | awk '{print $2}')
-    RUN_DIR="train_log/mbert/lr${LR}_ldur${LDUR}"
+    RUN_DIR="train_log_new/mbert/lr${LR}_ldur${LDUR}"
     echo "=========================================="
     echo " [mbert train] lr=${LR}  lambda-dur=${LDUR}"
     echo " log-dir: ${RUN_DIR}"

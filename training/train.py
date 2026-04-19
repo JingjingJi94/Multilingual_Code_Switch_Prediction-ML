@@ -144,7 +144,7 @@ def eval_epoch(
 
 def _compute_metrics(results: dict) -> dict:
     """Compute classification metrics from a results dict."""
-    sw_f1 = f1_score(results["sw_labels"], results["sw_preds"], average="macro", zero_division=0)
+    sw_f1 = f1_score(results["sw_labels"], results["sw_preds"], pos_label=1, zero_division=0)
     sw_acc = accuracy_score(results["sw_labels"], results["sw_preds"])
 
     dur_valid = results["dur_labels"] != -1
@@ -174,6 +174,7 @@ def train(
     log_fn: Callable[[str], None],
     use_amp: bool = True,
     scaler: Optional["torch.amp.GradScaler"] = None,
+    test_loader: Optional[torch.utils.data.DataLoader] = None,
 ) -> None:
     """Full training loop over num_epochs. Logs train + val metrics and saves checkpoints."""
     best_val_sw_f1 = -1.0
@@ -227,6 +228,24 @@ def train(
             f"  Switch   — F1 {vm['sw_f1']:.4f}  Acc {vm['sw_acc']:.4f}\n"
             f"  Duration — F1 {vm['dur_f1']:.4f}  Acc {vm['dur_acc']:.4f}"
         )
+
+        # Test evaluation (observe-only, does not affect checkpointing)
+        if test_loader is not None:
+            test_results = eval_epoch(model, test_loader, criterion, device)
+            tm = _compute_metrics(test_results)
+            test_loss = test_results["avg_loss"]
+
+            writer.add_scalar("Test/Loss_total", test_loss, global_step)
+            writer.add_scalar("Test/Switch_F1", tm["sw_f1"], global_step)
+            writer.add_scalar("Test/Switch_Accuracy", tm["sw_acc"], global_step)
+            writer.add_scalar("Test/Duration_F1", tm["dur_f1"], global_step)
+            writer.add_scalar("Test/Duration_Accuracy", tm["dur_acc"], global_step)
+
+            log_fn(
+                f"Epoch {epoch+1}/{num_epochs} [test]  | Loss {test_loss:.4f}\n"
+                f"  Switch   — F1 {tm['sw_f1']:.4f}  Acc {tm['sw_acc']:.4f}\n"
+                f"  Duration — F1 {tm['dur_f1']:.4f}  Acc {tm['dur_acc']:.4f}"
+            )
 
         if vm["sw_f1"] > best_val_sw_f1:
             best_val_sw_f1 = vm["sw_f1"]
@@ -320,9 +339,16 @@ def main() -> None:
 
         train_ds = SwitchLinguaStreamDataset(train_entries, tokenizer=tokenizer, window_size=args.window_size, sample_rate=args.sample_rate)
         val_ds = SwitchLinguaStreamDataset(val_entries, tokenizer=tokenizer, window_size=args.window_size)
+        test_ds = SwitchLinguaStreamDataset(test_entries, tokenizer=tokenizer, window_size=args.window_size)
         train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, pin_memory=False)
         val_loader = DataLoader(val_ds, batch_size=128, shuffle=False, pin_memory=False)
-        print(f"[{model_name}] Train windows: {len(train_ds)} | Val windows: {len(val_ds)}")
+        test_loader = DataLoader(test_ds, batch_size=128, shuffle=False, pin_memory=False)
+        print(f"[{model_name}] Train windows: {len(train_ds)} | Val windows: {len(val_ds)} | Test windows: {len(test_ds)}")
+
+        # Compute balanced class weights for the switch task (inverse frequency)
+        sw_labels_flat = [int(label) for entry in train_entries for label in entry["ysw"]]
+        sw_counts = torch.bincount(torch.tensor(sw_labels_flat, dtype=torch.long), minlength=2).float()
+        sw_class_weights = sw_counts.sum() / (2 * sw_counts)
 
         with open(os.path.join(log_dir, f"training_results_{model_name}.txt"), "w") as log_file:
             def log_fn(msg: str, _f=log_file) -> None:
@@ -331,9 +357,10 @@ def main() -> None:
                 _f.flush()
 
             log_fn(f"\n=== Training {model_name} ({backbone_name}) ===")
+            log_fn(f"[{model_name}] Switch class weights: no-switch={sw_class_weights[0]:.4f}, switch={sw_class_weights[1]:.4f}")
             writer = SummaryWriter(log_dir=os.path.join(log_dir, "tensorboard", model_name))
 
-            criterion = MultiTaskLoss(lambda_sw=args.lambda_sw, lambda_dur=args.lambda_dur)
+            criterion = MultiTaskLoss(lambda_sw=args.lambda_sw, lambda_dur=args.lambda_dur, sw_class_weights=sw_class_weights.to(device))
 
             model = DualHeadCausalModel(backbone_name=backbone_name).to(device)
 
@@ -362,6 +389,7 @@ def main() -> None:
                 log_fn=log_fn,
                 use_amp=use_amp,
                 scaler=scaler,
+                test_loader=test_loader,
             )
 
             writer.close()
