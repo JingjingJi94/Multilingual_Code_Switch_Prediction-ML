@@ -15,17 +15,17 @@ def main():
     Preprocess the SwitchLingua dataset using a selected tokenizer model.
 
     Usage:
-        python preprocess.py --model xlmr   # xlm-roberta-base  → preprocessed_data_xlmr.pkl
-        python preprocess.py --model mbert  # bert-base-multilingual-cased → preprocessed_data_mbert.pkl
-        python preprocess.py                # defaults to xlmr
+        python ./data_preprocess/preprocess.py --model xlmr   # xlm-roberta-base  → preprocessed_data_xlmr.pkl
+        python ./data_preprocess/preprocess.py --model mbert  # bert-base-multilingual-cased → preprocessed_data_mbert.pkl
+        python ./data_preprocess/preprocess.py                # defaults to xlmr
     """
     parser = argparse.ArgumentParser(
         description="Preprocess SwitchLingua dataset for code-switching prediction.",
         epilog=(
             "Examples:\n"
-            "  python preprocess.py --model xlmr   # uses xlm-roberta-base  → preprocessed_data_xlmr.pkl\n"
-            "  python preprocess.py --model mbert  # uses bert-base-multilingual-cased → preprocessed_data_mbert.pkl\n"
-            "  python preprocess.py                # defaults to xlmr"
+            "  python ./data_preprocess/preprocess.py --model xlmr   # uses xlm-roberta-base  → preprocessed_data_xlmr.pkl\n"
+            "  python ./data_preprocess/preprocess.py --model mbert  # uses bert-base-multilingual-cased → preprocessed_data_mbert.pkl\n"
+            "  python ./data_preprocess/preprocess.py                # defaults to xlmr"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
