@@ -1,6 +1,5 @@
 import argparse
 import pickle
-import pandas as pd
 from preprocess_util import preprocess_and_label
 from transformers import AutoTokenizer
 from huggingface_hub import login
