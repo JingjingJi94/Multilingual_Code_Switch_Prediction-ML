@@ -287,23 +287,39 @@ def main():
 
 
     # Get input text
-    text = args.text
-    if not text:
-        print(f"\nEnter {args.language_pair} text to process:")
-        text = input("> ").strip()
-
-    if not text:
-        print("No text provided. Exiting.")
+    if args.text:
+        stream_text(
+            text=args.text,
+            language_pair=args.language_pair,
+            model=model,
+            tokenizer=tokenizer,
+            window_size=args.window_size,
+            device=device,
+        )
         return
 
-    stream_text(
-        text=text,
-        language_pair=args.language_pair,
-        model=model,
-        tokenizer=tokenizer,
-        window_size=args.window_size,
-        device=device,
-    )
+    print(f"\nEnter {args.language_pair} text to process. Type 'exit' or press Ctrl+C to quit.\n")
+    while True:
+        try:
+            text = input("> ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting.")
+            break
+
+        if not text:
+            continue
+        if text.lower() in ("exit", "quit"):
+            print("Exiting.")
+            break
+
+        stream_text(
+            text=text,
+            language_pair=args.language_pair,
+            model=model,
+            tokenizer=tokenizer,
+            window_size=args.window_size,
+            device=device,
+        )
 
 
 if __name__ == "__main__":
