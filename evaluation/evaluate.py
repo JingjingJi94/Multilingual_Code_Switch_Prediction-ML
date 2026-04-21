@@ -51,6 +51,12 @@ parser.add_argument("--test-entries", type=str,
 parser.add_argument("--mbert-test-entries", type=str,
     default=None,
     help="Path to mBERT test entries .pkl. If not set, falls back to --test-entries.")
+parser.add_argument("--xlmr-zeroshot", type=str, default=None,
+    help="Path to XLM-R zero-shot entries .pkl (French-English, Korean-English).")
+parser.add_argument("--mbert-zeroshot", type=str, default=None,
+    help="Path to mBERT zero-shot entries .pkl (French-English, Korean-English).")
+parser.add_argument("--zeroshot-sample", type=int, default=800,
+    help="Max samples per zero-shot language pair (default: 800). Set 0 to disable.")
 parser.add_argument("--results-dir", default="results",
     help="Directory to save eval_results.json (default: results/)")
 args = parser.parse_args()
@@ -76,8 +82,38 @@ print(f"Loading mBERT  test entries: {mbert_test_path}")
 with open(mbert_test_path, "rb") as f:
     mbert_test_entries = pickle.load(f)
 
-print(f"XLM-R  test sequences: {len(xlmr_test_entries)}")
-print(f"mBERT  test sequences: {len(mbert_test_entries)}")
+def sample_zeroshot(entries, n, seed=42):
+    import random, collections
+    rng = random.Random(seed)
+    by_pair = collections.defaultdict(list)
+    for e in entries:
+        by_pair[e["language_pair"]].append(e)
+    sampled = []
+    for pair, items in by_pair.items():
+        rng.shuffle(items)
+        sampled.extend(items[:n])
+        print(f"  Zero-shot {pair}: {min(len(items), n)}/{len(items)} sampled")
+    return sampled
+
+# Append zero-shot entries if provided
+if args.xlmr_zeroshot:
+    print(f"Loading XLM-R  zero-shot entries: {args.xlmr_zeroshot}")
+    with open(args.xlmr_zeroshot, "rb") as f:
+        zs = pickle.load(f)
+    if args.zeroshot_sample > 0:
+        zs = sample_zeroshot(zs, args.zeroshot_sample)
+    xlmr_test_entries = xlmr_test_entries + zs
+
+if args.mbert_zeroshot:
+    print(f"Loading mBERT  zero-shot entries: {args.mbert_zeroshot}")
+    with open(args.mbert_zeroshot, "rb") as f:
+        zs = pickle.load(f)
+    if args.zeroshot_sample > 0:
+        zs = sample_zeroshot(zs, args.zeroshot_sample)
+    mbert_test_entries = mbert_test_entries + zs
+
+print(f"XLM-R  test sequences (total): {len(xlmr_test_entries)}")
+print(f"mBERT  test sequences (total): {len(mbert_test_entries)}")
 
 test_entries_map = {
     "xlmr":  xlmr_test_entries,

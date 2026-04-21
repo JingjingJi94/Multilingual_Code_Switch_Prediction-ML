@@ -11,5 +11,6 @@ plots/loss_curve_lambda2_*.png
 /training/*.txt
 /training/train_log/
 /checkpoints/
+/testdata_model/
 train_log/
 train_log_consistent/

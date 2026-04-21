@@ -1,68 +1,110 @@
 {
   "xlmr": {
     "per_pair": {
+      "Arabic-English": {
+        "anticipatory_f1": 0.637801458216489,
+        "anticipatory_precision": 0.6714690599905526,
+        "anticipatory_recall": 0.6073488570818201,
+        "duration_accuracy": 0.7007049775688955,
+        "n_tokens": 54867
+      },
       "Chinese-English": {
-        "anticipatory_f1": 0.6714272635722787,
-        "anticipatory_precision": 0.6851644245142003,
-        "anticipatory_recall": 0.6582301202656614,
-        "duration_accuracy": 0.7278765033207683,
-        "n_tokens": 69898
+        "anticipatory_f1": 0.6747027470274702,
+        "anticipatory_precision": 0.6885355648535565,
+        "anticipatory_recall": 0.6614147909967846,
+        "duration_accuracy": 0.7036977491961415,
+        "n_tokens": 74990
+      },
+      "French-English": {
+        "anticipatory_f1": 0.19500346981263011,
+        "anticipatory_precision": 0.18824317534751298,
+        "anticipatory_recall": 0.20226741047327695,
+        "duration_accuracy": 0.4002159438545978,
+        "n_tokens": 61145
       },
       "Hindi-English": {
-        "anticipatory_f1": 0.6952915997859818,
-        "anticipatory_precision": 0.6984681537221177,
-        "anticipatory_recall": 0.6921438082556591,
-        "duration_accuracy": 0.6620505992010652,
-        "n_tokens": 67857
+        "anticipatory_f1": 0.6787498216069645,
+        "anticipatory_precision": 0.7582908163265306,
+        "anticipatory_recall": 0.6143115474037716,
+        "duration_accuracy": 0.648411263239473,
+        "n_tokens": 65427
+      },
+      "Korean-English": {
+        "anticipatory_f1": 0.6989941768131286,
+        "anticipatory_precision": 0.7657156112270935,
+        "anticipatory_recall": 0.6429684456564082,
+        "duration_accuracy": 0.7275029216984807,
+        "n_tokens": 61758
       },
       "Spanish-English": {
-        "anticipatory_f1": 0.6224572823433686,
-        "anticipatory_precision": 0.6694865810968494,
-        "anticipatory_recall": 0.5816016218955905,
-        "duration_accuracy": 0.6206284845413077,
-        "n_tokens": 59088
+        "anticipatory_f1": 0.6542746113989637,
+        "anticipatory_precision": 0.7008463993339809,
+        "anticipatory_recall": 0.6135066197012025,
+        "duration_accuracy": 0.6318474432163246,
+        "n_tokens": 59272
       }
     },
     "overall": {
-      "anticipatory_f1": 0.6550215705795396,
-      "anticipatory_precision": 0.6815242639211501,
-      "anticipatory_recall": 0.6305029620164944,
-      "duration_accuracy": 0.6643628760599373,
-      "n_tokens": 196843
+      "anticipatory_f1": 0.5830156516348985,
+      "anticipatory_precision": 0.6100732957125251,
+      "anticipatory_recall": 0.5582561728395061,
+      "duration_accuracy": 0.6329534662867996,
+      "n_tokens": 377459
     },
-    "universality_sigma": 0.030317584559701405
+    "universality_sigma": 0.17765567975985097
   },
   "mbert": {
     "per_pair": {
+      "Arabic-English": {
+        "anticipatory_f1": 0.6091359135913591,
+        "anticipatory_precision": 0.6434513905395769,
+        "anticipatory_recall": 0.5782952360606708,
+        "duration_accuracy": 0.7086092715231788,
+        "n_tokens": 65882
+      },
       "Chinese-English": {
-        "anticipatory_f1": 0.6415711947626841,
-        "anticipatory_precision": 0.608506674945669,
-        "anticipatory_recall": 0.6784354447905849,
-        "duration_accuracy": 0.7765662859120803,
-        "n_tokens": 91493
+        "anticipatory_f1": 0.6445246690734056,
+        "anticipatory_precision": 0.6683860232945091,
+        "anticipatory_recall": 0.622308288148722,
+        "duration_accuracy": 0.7618900077459334,
+        "n_tokens": 97479
+      },
+      "French-English": {
+        "anticipatory_f1": 0.1987833090566361,
+        "anticipatory_precision": 0.16897305171158047,
+        "anticipatory_recall": 0.24136496046608405,
+        "duration_accuracy": 0.4606741573033708,
+        "n_tokens": 62540
       },
       "Hindi-English": {
-        "anticipatory_f1": 0.6748564561356657,
-        "anticipatory_precision": 0.6789360558839334,
-        "anticipatory_recall": 0.6708255906556941,
-        "duration_accuracy": 0.6304751791876825,
-        "n_tokens": 79284
+        "anticipatory_f1": 0.6695267091060061,
+        "anticipatory_precision": 0.7249026071321546,
+        "anticipatory_recall": 0.6220107996914374,
+        "duration_accuracy": 0.6438673180766263,
+        "n_tokens": 76251
+      },
+      "Korean-English": {
+        "anticipatory_f1": 0.593035050152147,
+        "anticipatory_precision": 0.7174802290700846,
+        "anticipatory_recall": 0.5053784095274683,
+        "duration_accuracy": 0.7447176334998079,
+        "n_tokens": 70181
       },
       "Spanish-English": {
-        "anticipatory_f1": 0.6115862068965517,
-        "anticipatory_precision": 0.6701934703748489,
-        "anticipatory_recall": 0.5624048706240488,
-        "duration_accuracy": 0.6253170979198377,
-        "n_tokens": 61725
+        "anticipatory_f1": 0.6536258927996912,
+        "anticipatory_precision": 0.694991789819376,
+        "anticipatory_recall": 0.6169075671079801,
+        "duration_accuracy": 0.6376776387708004,
+        "n_tokens": 61878
       }
     },
     "overall": {
-      "anticipatory_f1": 0.6361483820047356,
-      "anticipatory_precision": 0.6484505363528009,
-      "anticipatory_recall": 0.6243043203855643,
-      "duration_accuracy": 0.6765735268804866,
-      "n_tokens": 232502
+      "anticipatory_f1": 0.5571260670543116,
+      "anticipatory_precision": 0.5737720583550997,
+      "anticipatory_recall": 0.5414186955214908,
+      "duration_accuracy": 0.6636609558160504,
+      "n_tokens": 434211
     },
-    "universality_sigma": 0.02584168157750705
+    "universality_sigma": 0.16425440663453728
   }
 }
