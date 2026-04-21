@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import pickle
 import sys
@@ -22,6 +23,17 @@ from data.data_utils import load_dataset, split_entries
 from data.streaming_dataloader import SwitchLinguaStreamDataset
 from models.dual_head_model import DualHeadCausalModel
 from training.losses import MultiTaskLoss
+
+
+def _compute_sw_weights(train_entries: list, device: torch.device) -> torch.Tensor:
+    """Compute sqrt inverse-frequency weights for switch classes {0, 1} from raw entries."""
+    counts = [0, 0]
+    for entry in train_entries:
+        for label in entry["ysw"]:
+            counts[label] += 1
+    total = counts[0] + counts[1]
+    weights = [math.sqrt(total / max(c, 1)) for c in counts]
+    return torch.tensor(weights, dtype=torch.float, device=device)
 
 
 def run_epoch(
@@ -180,7 +192,6 @@ def train(
     log_fn: Callable[[str], None],
     use_amp: bool = True,
     scaler: Optional["torch.amp.GradScaler"] = None,
-    test_loader: Optional[torch.utils.data.DataLoader] = None,
 ) -> None:
     """Full training loop over num_epochs. Logs train + val metrics and saves checkpoints."""
     best_val_sw_f1 = -1.0
@@ -243,28 +254,6 @@ def train(
             f"  Duration — F1 {vm['dur_f1']:.4f}  Acc {vm['dur_acc']:.4f}  Prec {vm['dur_precision']:.4f}  Rec {vm['dur_recall']:.4f}"
         )
 
-        # Test evaluation (observe-only, does not affect checkpointing)
-        if test_loader is not None:
-            test_results = eval_epoch(model, test_loader, criterion, device)
-            tm = _compute_metrics(test_results)
-            test_loss = test_results["avg_loss"]
-
-            writer.add_scalar("Test/Loss_total", test_loss, global_step)
-            writer.add_scalar("Test/Switch_F1", tm["sw_f1"], global_step)
-            writer.add_scalar("Test/Switch_Accuracy", tm["sw_acc"], global_step)
-            writer.add_scalar("Test/Switch_Precision", tm["sw_precision"], global_step)
-            writer.add_scalar("Test/Switch_Recall", tm["sw_recall"], global_step)
-            writer.add_scalar("Test/Duration_F1", tm["dur_f1"], global_step)
-            writer.add_scalar("Test/Duration_Accuracy", tm["dur_acc"], global_step)
-            writer.add_scalar("Test/Duration_Precision", tm["dur_precision"], global_step)
-            writer.add_scalar("Test/Duration_Recall", tm["dur_recall"], global_step)
-
-            log_fn(
-                f"Epoch {epoch+1}/{num_epochs} [test]  | Loss {test_loss:.4f}\n"
-                f"  Switch   — F1 {tm['sw_f1']:.4f}  Acc {tm['sw_acc']:.4f}  Prec {tm['sw_precision']:.4f}  Rec {tm['sw_recall']:.4f}\n"
-                f"  Duration — F1 {tm['dur_f1']:.4f}  Acc {tm['dur_acc']:.4f}  Prec {tm['dur_precision']:.4f}  Rec {tm['dur_recall']:.4f}"
-            )
-
         if vm["sw_f1"] > best_val_sw_f1:
             best_val_sw_f1 = vm["sw_f1"]
             best_sw_f1_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -302,13 +291,17 @@ def main() -> None:
         help="Subsample 1%% of training data for quick debugging",
     )
     parser.add_argument("--epochs", type=int, default=None,
-        help="Number of training epochs (default: 2 in debug mode, 5 otherwise)")
+        help="Number of training epochs (default: 2 in debug mode, 10 otherwise)")
     parser.add_argument("--lr", type=float, default=1e-5,
         help="AdamW learning rate (default: 1e-5)")
     parser.add_argument("--lambda-sw", type=float, default=1.0,
         help="Loss weight for switch head (default: 1.0)")
     parser.add_argument("--lambda-dur", type=float, default=0.5,
         help="Loss weight for duration head (default: 0.5)")
+    parser.add_argument("--detach-dur", action="store_true",
+        help="Detach duration loss from computation graph (ablation baseline)")
+    parser.add_argument("--weighted-loss", action="store_true",
+        help="Use sqrt inverse-frequency class weights for the switch head loss")
     parser.add_argument("--sample-rate", type=float, default=0.2,
         help="Fraction of training positions sampled per epoch (default: 0.2)")
     parser.add_argument("--window-size", type=int, default=64,
@@ -357,11 +350,9 @@ def main() -> None:
 
         train_ds = SwitchLinguaStreamDataset(train_entries, tokenizer=tokenizer, window_size=args.window_size, sample_rate=args.sample_rate)
         val_ds = SwitchLinguaStreamDataset(val_entries, tokenizer=tokenizer, window_size=args.window_size)
-        test_ds = SwitchLinguaStreamDataset(test_entries, tokenizer=tokenizer, window_size=args.window_size)
         train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, pin_memory=False)
         val_loader = DataLoader(val_ds, batch_size=128, shuffle=False, pin_memory=False)
-        test_loader = DataLoader(test_ds, batch_size=128, shuffle=False, pin_memory=False)
-        print(f"[{model_name}] Train windows: {len(train_ds)} | Val windows: {len(val_ds)} | Test windows: {len(test_ds)}")
+        print(f"[{model_name}] Train windows: {len(train_ds)} | Val windows: {len(val_ds)}")
 
         with open(os.path.join(log_dir, f"training_results_{model_name}.txt"), "w") as log_file:
             def log_fn(msg: str, _f=log_file) -> None:
@@ -372,7 +363,10 @@ def main() -> None:
             log_fn(f"\n=== Training {model_name} ({backbone_name}) ===")
             writer = SummaryWriter(log_dir=os.path.join(log_dir, "tensorboard", model_name))
 
-            criterion = MultiTaskLoss(lambda_sw=args.lambda_sw, lambda_dur=args.lambda_dur)
+            sw_weight = _compute_sw_weights(train_entries, device) if args.weighted_loss else None
+            if sw_weight is not None:
+                log_fn(f"[weighted-loss] sw_weight={sw_weight.tolist()}")
+            criterion = MultiTaskLoss(lambda_sw=args.lambda_sw, lambda_dur=args.lambda_dur, detach_dur=args.detach_dur, sw_weight=sw_weight)
 
             model = DualHeadCausalModel(backbone_name=backbone_name).to(device)
 
@@ -401,7 +395,6 @@ def main() -> None:
                 log_fn=log_fn,
                 use_amp=use_amp,
                 scaler=scaler,
-                test_loader=test_loader,
             )
 
             writer.close()

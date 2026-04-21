@@ -14,3 +14,4 @@ plots/loss_curve_lambda2_*.png
 /testdata_model/
 train_log/
 train_log_consistent/
+train_log_detach/
