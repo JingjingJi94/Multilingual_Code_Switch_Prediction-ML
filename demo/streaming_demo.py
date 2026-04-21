@@ -234,7 +234,7 @@ def main():
 )
     parser.add_argument(
         "--language_pair",
-        required=True,
+        required=False,
         choices=[
             "French-English", "Spanish-English",
             "Chinese-English", "Hindi-English",
@@ -298,10 +298,29 @@ def main():
         )
         return
 
-    print(f"\nEnter {args.language_pair} text to process. Type 'exit' or press Ctrl+C to quit.\n")
+    valid_pairs = [
+        "French-English", "Spanish-English", "Chinese-English",
+        "Hindi-English", "Arabic-English", "Korean-English",
+    ]
+
+    print("\nType 'exit' or press Ctrl+C to quit.\n")
     while True:
         try:
-            text = input("> ").strip()
+            print(f"  Available pairs: {', '.join(valid_pairs)}")
+            language_pair = input("Language pair > ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting.")
+            break
+
+        if language_pair.lower() in ("exit", "quit"):
+            print("Exiting.")
+            break
+        if language_pair not in valid_pairs:
+            print("  Invalid language pair. Please choose from the list above.\n")
+            continue
+
+        try:
+            text = input("Text        > ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\nExiting.")
             break
@@ -314,12 +333,13 @@ def main():
 
         stream_text(
             text=text,
-            language_pair=args.language_pair,
+            language_pair=language_pair,
             model=model,
             tokenizer=tokenizer,
             window_size=args.window_size,
             device=device,
         )
+        print()
 
 
 if __name__ == "__main__":
