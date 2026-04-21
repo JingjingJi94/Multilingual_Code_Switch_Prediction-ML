@@ -9,6 +9,8 @@ import torch
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
+    precision_score,
+    recall_score,
 )
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -146,6 +148,8 @@ def _compute_metrics(results: dict) -> dict:
     """Compute classification metrics from a results dict."""
     sw_f1 = f1_score(results["sw_labels"], results["sw_preds"], pos_label=1, zero_division=0)
     sw_acc = accuracy_score(results["sw_labels"], results["sw_preds"])
+    sw_precision = precision_score(results["sw_labels"], results["sw_preds"], pos_label=1, zero_division=0)
+    sw_recall = recall_score(results["sw_labels"], results["sw_preds"], pos_label=1, zero_division=0)
 
     dur_valid = results["dur_labels"] != -1
     dur_labels_v = results["dur_labels"][dur_valid]
@@ -153,10 +157,12 @@ def _compute_metrics(results: dict) -> dict:
 
     dur_f1 = f1_score(dur_labels_v, dur_preds_v, average="macro", zero_division=0)
     dur_acc = accuracy_score(dur_labels_v, dur_preds_v)
+    dur_precision = precision_score(dur_labels_v, dur_preds_v, average="macro", zero_division=0)
+    dur_recall = recall_score(dur_labels_v, dur_preds_v, average="macro", zero_division=0)
 
     return dict(
-        sw_f1=sw_f1, sw_acc=sw_acc,
-        dur_f1=dur_f1, dur_acc=dur_acc,
+        sw_f1=sw_f1, sw_acc=sw_acc, sw_precision=sw_precision, sw_recall=sw_recall,
+        dur_f1=dur_f1, dur_acc=dur_acc, dur_precision=dur_precision, dur_recall=dur_recall,
     )
 
 
@@ -202,14 +208,18 @@ def train(
         writer.add_scalar("Train/Loss_duration", avg_Ldur, global_step)
         writer.add_scalar("Train/Switch_F1", m["sw_f1"], global_step)
         writer.add_scalar("Train/Switch_Accuracy", m["sw_acc"], global_step)
+        writer.add_scalar("Train/Switch_Precision", m["sw_precision"], global_step)
+        writer.add_scalar("Train/Switch_Recall", m["sw_recall"], global_step)
         writer.add_scalar("Train/Duration_F1", m["dur_f1"], global_step)
         writer.add_scalar("Train/Duration_Accuracy", m["dur_acc"], global_step)
+        writer.add_scalar("Train/Duration_Precision", m["dur_precision"], global_step)
+        writer.add_scalar("Train/Duration_Recall", m["dur_recall"], global_step)
 
         log_fn(
             f"Epoch {epoch+1}/{num_epochs} [train] | "
             f"Loss {avg_loss:.4f} (sw {avg_Lsw:.4f}, dur {avg_Ldur:.4f})\n"
-            f"  Switch   — F1 {m['sw_f1']:.4f}  Acc {m['sw_acc']:.4f}\n"
-            f"  Duration — F1 {m['dur_f1']:.4f}  Acc {m['dur_acc']:.4f}"
+            f"  Switch   — F1 {m['sw_f1']:.4f}  Acc {m['sw_acc']:.4f}  Prec {m['sw_precision']:.4f}  Rec {m['sw_recall']:.4f}\n"
+            f"  Duration — F1 {m['dur_f1']:.4f}  Acc {m['dur_acc']:.4f}  Prec {m['dur_precision']:.4f}  Rec {m['dur_recall']:.4f}"
         )
 
         # Validation
@@ -220,13 +230,17 @@ def train(
         writer.add_scalar("Val/Loss_total", val_loss, global_step)
         writer.add_scalar("Val/Switch_F1", vm["sw_f1"], global_step)
         writer.add_scalar("Val/Switch_Accuracy", vm["sw_acc"], global_step)
+        writer.add_scalar("Val/Switch_Precision", vm["sw_precision"], global_step)
+        writer.add_scalar("Val/Switch_Recall", vm["sw_recall"], global_step)
         writer.add_scalar("Val/Duration_F1", vm["dur_f1"], global_step)
         writer.add_scalar("Val/Duration_Accuracy", vm["dur_acc"], global_step)
+        writer.add_scalar("Val/Duration_Precision", vm["dur_precision"], global_step)
+        writer.add_scalar("Val/Duration_Recall", vm["dur_recall"], global_step)
 
         log_fn(
             f"Epoch {epoch+1}/{num_epochs} [val]   | Loss {val_loss:.4f}\n"
-            f"  Switch   — F1 {vm['sw_f1']:.4f}  Acc {vm['sw_acc']:.4f}\n"
-            f"  Duration — F1 {vm['dur_f1']:.4f}  Acc {vm['dur_acc']:.4f}"
+            f"  Switch   — F1 {vm['sw_f1']:.4f}  Acc {vm['sw_acc']:.4f}  Prec {vm['sw_precision']:.4f}  Rec {vm['sw_recall']:.4f}\n"
+            f"  Duration — F1 {vm['dur_f1']:.4f}  Acc {vm['dur_acc']:.4f}  Prec {vm['dur_precision']:.4f}  Rec {vm['dur_recall']:.4f}"
         )
 
         # Test evaluation (observe-only, does not affect checkpointing)
@@ -238,13 +252,17 @@ def train(
             writer.add_scalar("Test/Loss_total", test_loss, global_step)
             writer.add_scalar("Test/Switch_F1", tm["sw_f1"], global_step)
             writer.add_scalar("Test/Switch_Accuracy", tm["sw_acc"], global_step)
+            writer.add_scalar("Test/Switch_Precision", tm["sw_precision"], global_step)
+            writer.add_scalar("Test/Switch_Recall", tm["sw_recall"], global_step)
             writer.add_scalar("Test/Duration_F1", tm["dur_f1"], global_step)
             writer.add_scalar("Test/Duration_Accuracy", tm["dur_acc"], global_step)
+            writer.add_scalar("Test/Duration_Precision", tm["dur_precision"], global_step)
+            writer.add_scalar("Test/Duration_Recall", tm["dur_recall"], global_step)
 
             log_fn(
                 f"Epoch {epoch+1}/{num_epochs} [test]  | Loss {test_loss:.4f}\n"
-                f"  Switch   — F1 {tm['sw_f1']:.4f}  Acc {tm['sw_acc']:.4f}\n"
-                f"  Duration — F1 {tm['dur_f1']:.4f}  Acc {tm['dur_acc']:.4f}"
+                f"  Switch   — F1 {tm['sw_f1']:.4f}  Acc {tm['sw_acc']:.4f}  Prec {tm['sw_precision']:.4f}  Rec {tm['sw_recall']:.4f}\n"
+                f"  Duration — F1 {tm['dur_f1']:.4f}  Acc {tm['dur_acc']:.4f}  Prec {tm['dur_precision']:.4f}  Rec {tm['dur_recall']:.4f}"
             )
 
         if vm["sw_f1"] > best_val_sw_f1:
@@ -345,11 +363,6 @@ def main() -> None:
         test_loader = DataLoader(test_ds, batch_size=128, shuffle=False, pin_memory=False)
         print(f"[{model_name}] Train windows: {len(train_ds)} | Val windows: {len(val_ds)} | Test windows: {len(test_ds)}")
 
-        # Compute balanced class weights for the switch task (inverse frequency)
-        sw_labels_flat = [int(label) for entry in train_entries for label in entry["ysw"]]
-        sw_counts = torch.bincount(torch.tensor(sw_labels_flat, dtype=torch.long), minlength=2).float()
-        sw_class_weights = sw_counts.sum() / (2 * sw_counts)
-
         with open(os.path.join(log_dir, f"training_results_{model_name}.txt"), "w") as log_file:
             def log_fn(msg: str, _f=log_file) -> None:
                 print(msg)
@@ -357,10 +370,9 @@ def main() -> None:
                 _f.flush()
 
             log_fn(f"\n=== Training {model_name} ({backbone_name}) ===")
-            log_fn(f"[{model_name}] Switch class weights: no-switch={sw_class_weights[0]:.4f}, switch={sw_class_weights[1]:.4f}")
             writer = SummaryWriter(log_dir=os.path.join(log_dir, "tensorboard", model_name))
 
-            criterion = MultiTaskLoss(lambda_sw=args.lambda_sw, lambda_dur=args.lambda_dur, sw_class_weights=sw_class_weights.to(device))
+            criterion = MultiTaskLoss(lambda_sw=args.lambda_sw, lambda_dur=args.lambda_dur)
 
             model = DualHeadCausalModel(backbone_name=backbone_name).to(device)
 

@@ -3,11 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class MultiTaskLoss(nn.Module):
-    def __init__(self, lambda_sw=1.0, lambda_dur=1.0, sw_class_weights=None):
+    def __init__(self, lambda_sw=1.0, lambda_dur=1.0):
         super().__init__()
         self.lambda_sw = lambda_sw
         self.lambda_dur = lambda_dur
-        self.switch_loss_fn = nn.CrossEntropyLoss(weight=sw_class_weights)
+        self.switch_loss_fn = nn.CrossEntropyLoss()
         self.duration_loss_fn = nn.CrossEntropyLoss(ignore_index=-1)
 
     def forward(self, switch_logits, duration_logits, ysw, ydur):
