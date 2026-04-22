@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import pickle
 import sys
@@ -6,6 +7,7 @@ from typing import Callable, Optional
 
 import numpy as np
 import torch
+import torch.nn as nn
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -21,17 +23,30 @@ sys.path.append(".")
 from data.data_utils import load_dataset, split_entries
 from data.streaming_dataloader import SwitchLinguaStreamDataset
 from models.dual_head_model import DualHeadCausalModel
+from models.single_head_model import SingleHeadModel
 from training.losses import MultiTaskLoss
+
+
+def _compute_sw_weights(train_entries: list, device: torch.device) -> torch.Tensor:
+    """Compute sqrt inverse-frequency weights for switch classes {0, 1} from raw entries."""
+    counts = [0, 0]
+    for entry in train_entries:
+        for label in entry["ysw"]:
+            counts[label] += 1
+    total = counts[0] + counts[1]
+    weights = [math.sqrt(total / max(c, 1)) for c in counts]
+    return torch.tensor(weights, dtype=torch.float, device=device)
 
 
 def run_epoch(
     model: torch.nn.Module,
     loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
-    criterion: MultiTaskLoss,
+    criterion,
     device: torch.device,
     scaler: Optional["torch.amp.GradScaler"],
     use_amp: bool,
+    single_task: bool = False,
 ) -> dict:
     """Run one training epoch. Returns a dict of averaged losses and collected arrays."""
     model.train()
@@ -55,14 +70,24 @@ def run_epoch(
 
         if use_amp:
             with torch.amp.autocast(device_type="cuda"):
-                switch_logits, duration_logits = model(input_ids, attention_mask)
-                loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
+                if single_task:
+                    switch_logits = model(input_ids, attention_mask)
+                    loss = criterion(switch_logits, ysw)
+                    L_sw, L_dur = loss, torch.tensor(0.)
+                else:
+                    switch_logits, duration_logits = model(input_ids, attention_mask)
+                    loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
-            switch_logits, duration_logits = model(input_ids, attention_mask)
-            loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
+            if single_task:
+                switch_logits = model(input_ids, attention_mask)
+                loss = criterion(switch_logits, ysw)
+                L_sw, L_dur = loss, torch.tensor(0.)
+            else:
+                switch_logits, duration_logits = model(input_ids, attention_mask)
+                loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
             loss.backward()
             optimizer.step()
 
@@ -71,14 +96,12 @@ def run_epoch(
         total_Ldur += L_dur.item()
         num_batches += 1
 
-        sw_logits_f = switch_logits.detach().float()
-        dur_logits_f = duration_logits.detach().float()
-
-        all_sw_preds.extend(sw_logits_f.argmax(dim=-1).cpu().numpy())
+        all_sw_preds.extend(switch_logits.detach().float().argmax(dim=-1).cpu().numpy())
         all_sw_labels.extend(ysw.cpu().numpy())
 
-        all_dur_preds.extend(dur_logits_f.argmax(dim=-1).cpu().numpy())
-        all_dur_labels.extend(ydur.cpu().numpy())
+        if not single_task:
+            all_dur_preds.extend(duration_logits.detach().float().argmax(dim=-1).cpu().numpy())
+            all_dur_labels.extend(ydur.cpu().numpy())
 
     return {
         "avg_loss": total_loss / num_batches,
@@ -86,16 +109,17 @@ def run_epoch(
         "avg_Ldur": total_Ldur / num_batches,
         "sw_preds": np.array(all_sw_preds),
         "sw_labels": np.array(all_sw_labels),
-        "dur_preds": np.array(all_dur_preds),
-        "dur_labels": np.array(all_dur_labels),
+        "dur_preds": np.array(all_dur_preds) if not single_task else np.array([]),
+        "dur_labels": np.array(all_dur_labels) if not single_task else np.array([]),
     }
 
 
 def eval_epoch(
     model: torch.nn.Module,
     loader: torch.utils.data.DataLoader,
-    criterion: MultiTaskLoss,
+    criterion,
     device: torch.device,
+    single_task: bool = False,
 ) -> dict:
     """Run one evaluation epoch (no gradient updates). Returns same dict shape as run_epoch."""
     model.eval()
@@ -116,22 +140,25 @@ def eval_epoch(
             ysw = ysw.to(device)
             ydur = ydur.to(device)
 
-            switch_logits, duration_logits = model(input_ids, attention_mask)
-            loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
+            if single_task:
+                switch_logits = model(input_ids, attention_mask)
+                loss = criterion(switch_logits, ysw)
+                L_sw, L_dur = loss, torch.tensor(0.)
+            else:
+                switch_logits, duration_logits = model(input_ids, attention_mask)
+                loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
 
             total_loss += loss.item()
             total_Lsw += L_sw.item()
             total_Ldur += L_dur.item()
             num_batches += 1
 
-            sw_logits_f = switch_logits.float()
-            dur_logits_f = duration_logits.float()
-
-            all_sw_preds.extend(sw_logits_f.argmax(dim=-1).cpu().numpy())
+            all_sw_preds.extend(switch_logits.float().argmax(dim=-1).cpu().numpy())
             all_sw_labels.extend(ysw.cpu().numpy())
 
-            all_dur_preds.extend(dur_logits_f.argmax(dim=-1).cpu().numpy())
-            all_dur_labels.extend(ydur.cpu().numpy())
+            if not single_task:
+                all_dur_preds.extend(duration_logits.float().argmax(dim=-1).cpu().numpy())
+                all_dur_labels.extend(ydur.cpu().numpy())
 
     return {
         "avg_loss": total_loss / num_batches,
@@ -139,8 +166,8 @@ def eval_epoch(
         "avg_Ldur": total_Ldur / num_batches,
         "sw_preds": np.array(all_sw_preds),
         "sw_labels": np.array(all_sw_labels),
-        "dur_preds": np.array(all_dur_preds),
-        "dur_labels": np.array(all_dur_labels),
+        "dur_preds": np.array(all_dur_preds) if not single_task else np.array([]),
+        "dur_labels": np.array(all_dur_labels) if not single_task else np.array([]),
     }
 
 
@@ -171,7 +198,7 @@ def train(
     loader: torch.utils.data.DataLoader,
     val_loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
-    criterion: MultiTaskLoss,
+    criterion,
     num_epochs: int,
     device: torch.device,
     writer: SummaryWriter,
@@ -180,7 +207,7 @@ def train(
     log_fn: Callable[[str], None],
     use_amp: bool = True,
     scaler: Optional["torch.amp.GradScaler"] = None,
-    test_loader: Optional[torch.utils.data.DataLoader] = None,
+    single_task: bool = False,
 ) -> None:
     """Full training loop over num_epochs. Logs train + val metrics and saves checkpoints."""
     best_val_sw_f1 = -1.0
@@ -192,7 +219,7 @@ def train(
 
     epoch_bar = tqdm(range(num_epochs), desc=f"[{model_name}] epochs")
     for epoch in epoch_bar:
-        results = run_epoch(model, loader, optimizer, criterion, device, scaler, use_amp)
+        results = run_epoch(model, loader, optimizer, criterion, device, scaler, use_amp, single_task=single_task)
         m = _compute_metrics(results)
 
         avg_loss = results["avg_loss"]
@@ -223,7 +250,7 @@ def train(
         )
 
         # Validation
-        val_results = eval_epoch(model, val_loader, criterion, device)
+        val_results = eval_epoch(model, val_loader, criterion, device, single_task=single_task)
         vm = _compute_metrics(val_results)
         val_loss = val_results["avg_loss"]
 
@@ -242,28 +269,6 @@ def train(
             f"  Switch   — F1 {vm['sw_f1']:.4f}  Acc {vm['sw_acc']:.4f}  Prec {vm['sw_precision']:.4f}  Rec {vm['sw_recall']:.4f}\n"
             f"  Duration — F1 {vm['dur_f1']:.4f}  Acc {vm['dur_acc']:.4f}  Prec {vm['dur_precision']:.4f}  Rec {vm['dur_recall']:.4f}"
         )
-
-        # Test evaluation (observe-only, does not affect checkpointing)
-        if test_loader is not None:
-            test_results = eval_epoch(model, test_loader, criterion, device)
-            tm = _compute_metrics(test_results)
-            test_loss = test_results["avg_loss"]
-
-            writer.add_scalar("Test/Loss_total", test_loss, global_step)
-            writer.add_scalar("Test/Switch_F1", tm["sw_f1"], global_step)
-            writer.add_scalar("Test/Switch_Accuracy", tm["sw_acc"], global_step)
-            writer.add_scalar("Test/Switch_Precision", tm["sw_precision"], global_step)
-            writer.add_scalar("Test/Switch_Recall", tm["sw_recall"], global_step)
-            writer.add_scalar("Test/Duration_F1", tm["dur_f1"], global_step)
-            writer.add_scalar("Test/Duration_Accuracy", tm["dur_acc"], global_step)
-            writer.add_scalar("Test/Duration_Precision", tm["dur_precision"], global_step)
-            writer.add_scalar("Test/Duration_Recall", tm["dur_recall"], global_step)
-
-            log_fn(
-                f"Epoch {epoch+1}/{num_epochs} [test]  | Loss {test_loss:.4f}\n"
-                f"  Switch   — F1 {tm['sw_f1']:.4f}  Acc {tm['sw_acc']:.4f}  Prec {tm['sw_precision']:.4f}  Rec {tm['sw_recall']:.4f}\n"
-                f"  Duration — F1 {tm['dur_f1']:.4f}  Acc {tm['dur_acc']:.4f}  Prec {tm['dur_precision']:.4f}  Rec {tm['dur_recall']:.4f}"
-            )
 
         if vm["sw_f1"] > best_val_sw_f1:
             best_val_sw_f1 = vm["sw_f1"]
@@ -302,13 +307,19 @@ def main() -> None:
         help="Subsample 1%% of training data for quick debugging",
     )
     parser.add_argument("--epochs", type=int, default=None,
-        help="Number of training epochs (default: 2 in debug mode, 5 otherwise)")
+        help="Number of training epochs (default: 2 in debug mode, 10 otherwise)")
     parser.add_argument("--lr", type=float, default=1e-5,
         help="AdamW learning rate (default: 1e-5)")
     parser.add_argument("--lambda-sw", type=float, default=1.0,
         help="Loss weight for switch head (default: 1.0)")
     parser.add_argument("--lambda-dur", type=float, default=0.5,
         help="Loss weight for duration head (default: 0.5)")
+    parser.add_argument("--detach-dur", action="store_true",
+        help="Detach duration loss from computation graph (ablation baseline)")
+    parser.add_argument("--single-task", action="store_true",
+        help="Train switch-only model without duration head (single-task ablation)")
+    parser.add_argument("--weighted-loss", action="store_true",
+        help="Use sqrt inverse-frequency class weights for the switch head loss")
     parser.add_argument("--sample-rate", type=float, default=0.2,
         help="Fraction of training positions sampled per epoch (default: 0.2)")
     parser.add_argument("--window-size", type=int, default=64,
@@ -357,11 +368,9 @@ def main() -> None:
 
         train_ds = SwitchLinguaStreamDataset(train_entries, tokenizer=tokenizer, window_size=args.window_size, sample_rate=args.sample_rate)
         val_ds = SwitchLinguaStreamDataset(val_entries, tokenizer=tokenizer, window_size=args.window_size)
-        test_ds = SwitchLinguaStreamDataset(test_entries, tokenizer=tokenizer, window_size=args.window_size)
         train_loader = DataLoader(train_ds, batch_size=128, shuffle=True, pin_memory=False)
         val_loader = DataLoader(val_ds, batch_size=128, shuffle=False, pin_memory=False)
-        test_loader = DataLoader(test_ds, batch_size=128, shuffle=False, pin_memory=False)
-        print(f"[{model_name}] Train windows: {len(train_ds)} | Val windows: {len(val_ds)} | Test windows: {len(test_ds)}")
+        print(f"[{model_name}] Train windows: {len(train_ds)} | Val windows: {len(val_ds)}")
 
         with open(os.path.join(log_dir, f"training_results_{model_name}.txt"), "w") as log_file:
             def log_fn(msg: str, _f=log_file) -> None:
@@ -372,9 +381,18 @@ def main() -> None:
             log_fn(f"\n=== Training {model_name} ({backbone_name}) ===")
             writer = SummaryWriter(log_dir=os.path.join(log_dir, "tensorboard", model_name))
 
-            criterion = MultiTaskLoss(lambda_sw=args.lambda_sw, lambda_dur=args.lambda_dur)
+            sw_weight = _compute_sw_weights(train_entries, device) if args.weighted_loss else None
+            if sw_weight is not None:
+                log_fn(f"[weighted-loss] sw_weight={sw_weight.tolist()}")
 
-            model = DualHeadCausalModel(backbone_name=backbone_name).to(device)
+            if args.single_task:
+                criterion = nn.CrossEntropyLoss()
+                model = SingleHeadModel(backbone_name=backbone_name).to(device)
+                log_fn(f"[{model_name}] Mode: single-task (switch head only)")
+            else:
+                criterion = MultiTaskLoss(lambda_sw=args.lambda_sw, lambda_dur=args.lambda_dur, detach_dur=args.detach_dur, sw_weight=sw_weight)
+                model = DualHeadCausalModel(backbone_name=backbone_name).to(device)
+                log_fn(f"[{model_name}] Mode: multi-task (switch + duration heads)")
 
             # torch.compile: must come after .to(device) and before AdamW
             # if hasattr(torch, "compile"):
@@ -401,7 +419,7 @@ def main() -> None:
                 log_fn=log_fn,
                 use_amp=use_amp,
                 scaler=scaler,
-                test_loader=test_loader,
+                single_task=args.single_task,
             )
 
             writer.close()
