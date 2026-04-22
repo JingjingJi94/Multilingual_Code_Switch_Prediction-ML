@@ -13,7 +13,7 @@ RUNS=(
 for RUN in "${RUNS[@]}"; do
     LR=$(echo "$RUN" | awk '{print $1}')
     LDUR=$(echo "$RUN" | awk '{print $2}')
-    RUN_DIR="train_log/xlmr/w128_lr${LR}_ldur${LDUR}"
+    RUN_DIR="train_log_w128/xlmr/w128_lr${LR}_ldur${LDUR}"
     echo "=========================================="
     echo " [xlmr train] window=128  lr=${LR}  lambda-dur=${LDUR}"
     echo " log-dir: ${RUN_DIR}"
@@ -27,7 +27,7 @@ for RUN in "${RUNS[@]}"; do
         ${EXTRA_ARGS}
 done
 
-echo "[xlmr train] Done. Logs saved under train_log/"
+echo "[xlmr train] Done. Logs saved under train_log_w128/"
 echo ""
 echo "View all runs with:"
-echo "  tensorboard --logdir train_log/"
+echo "  tensorboard --logdir train_log_w128/"
