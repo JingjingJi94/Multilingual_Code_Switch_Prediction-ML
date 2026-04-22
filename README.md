@@ -77,6 +77,106 @@ pip install -r requirement.txt
 
 ---
 
+## 5. Streaming Demo
+
+The streaming demo predicts the **next-token switch probability** and **anticipated duration** from a bilingual text prefix using a trained model checkpoint.
+
+### 5.1 Setup
+
+Place your trained model checkpoint (`.pt` file) inside the `demo/` folder:
+
+```
+demo/
+├── streaming_demo.py
+└── xlmr_best_sw_f1.pt      ← your checkpoint here
+```
+
+### 5.2 Run the Demo
+
+Navigate into the `demo/` folder and run:
+
+```bash
+cd demo
+python streaming_demo.py --model_path xlmr_best_sw_f1.pt --backbone xlmr
+```
+
+The demo will prompt you interactively for a language pair and input text each round. Type `exit` or press `Ctrl+C` to quit.
+
+### 5.3 Interactive Input
+
+Each round the demo prompts for:
+
+1. **Language pair** — choose from the supported pairs listed
+2. **Text** — enter a bilingual prefix sentence
+
+```
+  Available pairs: French-English, Spanish-English, Chinese-English, Hindi-English, Arabic-English, Korean-English
+Language pair > Hindi-English
+Text        > आजकल technology बहुत तेजी से बदल रही है, right? Smartphones और laptops के बिना life imagine करना मुश्किल है
+```
+
+### 5.4 Example Output
+
+The demo walks through 5 steps — tokenization, input ID conversion, prediction point identification, sliding window construction, and model forward pass — before printing the final result:
+
+```
+────────────────────────────────────────────────────────────────────────────────
+  Prediction Result  |  Hindi-English
+────────────────────────────────────────────────────────────────────────────────
+  TOKEN                LANG   | NEXT-TOKEN SWITCH PROB   | ANTICIPATED DURATION   | FLAG
+────────────────────────────────────────────────────────────────────────────────
+  है                   hi     | 0.823                    | Short (1-2 tokens)     | ⚠ HIGH SWITCH
+────────────────────────────────────────────────────────────────────────────────
+```
+
+### 5.5 Supported Language Pairs
+
+| Language Pair     | Trained | Notes                        |
+|-------------------|---------|------------------------------|
+| Spanish-English   | ✅      | Training pair                |
+| Chinese-English   | ✅      | Training pair                |
+| Hindi-English     | ✅      | Training pair                |
+| Arabic-English    | ✅      | Training pair                |
+| Korean-English    | ❌      | Zero-shot (unseen)           |
+| French-English    | ❌      | Zero-shot (unseen)           |
+
+### 5.6 Arguments
+
+| Argument          | Required | Default | Description                                      |
+|-------------------|----------|---------|--------------------------------------------------|
+| `--model_path`    | Yes*     | None    | Path to `.pt` checkpoint file                    |
+| `--backbone`      | No       | `xlmr`  | Tokenizer: `xlmr` or `mbert`                     |
+| `--text`          | No       | None    | Pass text directly (skips interactive prompt)    |
+| `--language_pair` | No       | None    | Pass language pair directly (skips prompt)       |
+| `--window_size`   | No       | 64      | Sliding window size in tokens                    |
+| `--dummy`         | No       | False   | Use randomly initialized model for pipeline test |
+
+*Not required when `--dummy` is passed.
+
+### 5.7 Single-Command Mode
+
+To run a single prediction without interactive prompts:
+
+```bash
+python streaming_demo.py \
+    --model_path xlmr_best_sw_f1.pt \
+    --backbone xlmr \
+    --language_pair Korean-English \
+    --text "WWE가 이번에 Bloodline 재결합 경기를 발표했어. It's a big event for SmackDown"
+```
+
+### 5.8 Pipeline Testing (No Checkpoint Required)
+
+To verify the pipeline runs correctly without a trained checkpoint:
+
+```bash
+python streaming_demo.py --dummy --language_pair French-English --text "Après la victoire du Real Madrid, je vais lire tous les articles sur le match"
+```
+
+> **Note:** `--dummy` uses randomly initialized prediction heads — output probabilities will be meaningless but the full pipeline (tokenization → windowing → forward pass → output) is exercised end to end.
+
+---
+
 ## Streaming Data Loader Interface
 This module provides a unified interface for loading and inspecting the **SwitchLingua streaming dataset** used for next-token code-switch prediction.
 
