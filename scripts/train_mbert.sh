@@ -7,7 +7,7 @@ set -euo pipefail
 EXTRA_ARGS="$@"
 
 RUNS=(
-    "1e-5 1.0"
+    "1e-5 0.1"
 )
 
 for RUN in "${RUNS[@]}"; do

@@ -7,6 +7,7 @@ from typing import Callable, Optional
 
 import numpy as np
 import torch
+import torch.nn as nn
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -22,6 +23,7 @@ sys.path.append(".")
 from data.data_utils import load_dataset, split_entries
 from data.streaming_dataloader import SwitchLinguaStreamDataset
 from models.dual_head_model import DualHeadCausalModel
+from models.single_head_model import SingleHeadModel
 from training.losses import MultiTaskLoss
 
 
@@ -40,10 +42,11 @@ def run_epoch(
     model: torch.nn.Module,
     loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
-    criterion: MultiTaskLoss,
+    criterion,
     device: torch.device,
     scaler: Optional["torch.amp.GradScaler"],
     use_amp: bool,
+    single_task: bool = False,
 ) -> dict:
     """Run one training epoch. Returns a dict of averaged losses and collected arrays."""
     model.train()
@@ -67,14 +70,24 @@ def run_epoch(
 
         if use_amp:
             with torch.amp.autocast(device_type="cuda"):
-                switch_logits, duration_logits = model(input_ids, attention_mask)
-                loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
+                if single_task:
+                    switch_logits = model(input_ids, attention_mask)
+                    loss = criterion(switch_logits, ysw)
+                    L_sw, L_dur = loss, torch.tensor(0.)
+                else:
+                    switch_logits, duration_logits = model(input_ids, attention_mask)
+                    loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
-            switch_logits, duration_logits = model(input_ids, attention_mask)
-            loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
+            if single_task:
+                switch_logits = model(input_ids, attention_mask)
+                loss = criterion(switch_logits, ysw)
+                L_sw, L_dur = loss, torch.tensor(0.)
+            else:
+                switch_logits, duration_logits = model(input_ids, attention_mask)
+                loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
             loss.backward()
             optimizer.step()
 
@@ -83,14 +96,12 @@ def run_epoch(
         total_Ldur += L_dur.item()
         num_batches += 1
 
-        sw_logits_f = switch_logits.detach().float()
-        dur_logits_f = duration_logits.detach().float()
-
-        all_sw_preds.extend(sw_logits_f.argmax(dim=-1).cpu().numpy())
+        all_sw_preds.extend(switch_logits.detach().float().argmax(dim=-1).cpu().numpy())
         all_sw_labels.extend(ysw.cpu().numpy())
 
-        all_dur_preds.extend(dur_logits_f.argmax(dim=-1).cpu().numpy())
-        all_dur_labels.extend(ydur.cpu().numpy())
+        if not single_task:
+            all_dur_preds.extend(duration_logits.detach().float().argmax(dim=-1).cpu().numpy())
+            all_dur_labels.extend(ydur.cpu().numpy())
 
     return {
         "avg_loss": total_loss / num_batches,
@@ -98,16 +109,17 @@ def run_epoch(
         "avg_Ldur": total_Ldur / num_batches,
         "sw_preds": np.array(all_sw_preds),
         "sw_labels": np.array(all_sw_labels),
-        "dur_preds": np.array(all_dur_preds),
-        "dur_labels": np.array(all_dur_labels),
+        "dur_preds": np.array(all_dur_preds) if not single_task else np.array([]),
+        "dur_labels": np.array(all_dur_labels) if not single_task else np.array([]),
     }
 
 
 def eval_epoch(
     model: torch.nn.Module,
     loader: torch.utils.data.DataLoader,
-    criterion: MultiTaskLoss,
+    criterion,
     device: torch.device,
+    single_task: bool = False,
 ) -> dict:
     """Run one evaluation epoch (no gradient updates). Returns same dict shape as run_epoch."""
     model.eval()
@@ -128,22 +140,25 @@ def eval_epoch(
             ysw = ysw.to(device)
             ydur = ydur.to(device)
 
-            switch_logits, duration_logits = model(input_ids, attention_mask)
-            loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
+            if single_task:
+                switch_logits = model(input_ids, attention_mask)
+                loss = criterion(switch_logits, ysw)
+                L_sw, L_dur = loss, torch.tensor(0.)
+            else:
+                switch_logits, duration_logits = model(input_ids, attention_mask)
+                loss, L_sw, L_dur = criterion(switch_logits, duration_logits, ysw, ydur)
 
             total_loss += loss.item()
             total_Lsw += L_sw.item()
             total_Ldur += L_dur.item()
             num_batches += 1
 
-            sw_logits_f = switch_logits.float()
-            dur_logits_f = duration_logits.float()
-
-            all_sw_preds.extend(sw_logits_f.argmax(dim=-1).cpu().numpy())
+            all_sw_preds.extend(switch_logits.float().argmax(dim=-1).cpu().numpy())
             all_sw_labels.extend(ysw.cpu().numpy())
 
-            all_dur_preds.extend(dur_logits_f.argmax(dim=-1).cpu().numpy())
-            all_dur_labels.extend(ydur.cpu().numpy())
+            if not single_task:
+                all_dur_preds.extend(duration_logits.float().argmax(dim=-1).cpu().numpy())
+                all_dur_labels.extend(ydur.cpu().numpy())
 
     return {
         "avg_loss": total_loss / num_batches,
@@ -151,8 +166,8 @@ def eval_epoch(
         "avg_Ldur": total_Ldur / num_batches,
         "sw_preds": np.array(all_sw_preds),
         "sw_labels": np.array(all_sw_labels),
-        "dur_preds": np.array(all_dur_preds),
-        "dur_labels": np.array(all_dur_labels),
+        "dur_preds": np.array(all_dur_preds) if not single_task else np.array([]),
+        "dur_labels": np.array(all_dur_labels) if not single_task else np.array([]),
     }
 
 
@@ -183,7 +198,7 @@ def train(
     loader: torch.utils.data.DataLoader,
     val_loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
-    criterion: MultiTaskLoss,
+    criterion,
     num_epochs: int,
     device: torch.device,
     writer: SummaryWriter,
@@ -192,6 +207,7 @@ def train(
     log_fn: Callable[[str], None],
     use_amp: bool = True,
     scaler: Optional["torch.amp.GradScaler"] = None,
+    single_task: bool = False,
 ) -> None:
     """Full training loop over num_epochs. Logs train + val metrics and saves checkpoints."""
     best_val_sw_f1 = -1.0
@@ -203,7 +219,7 @@ def train(
 
     epoch_bar = tqdm(range(num_epochs), desc=f"[{model_name}] epochs")
     for epoch in epoch_bar:
-        results = run_epoch(model, loader, optimizer, criterion, device, scaler, use_amp)
+        results = run_epoch(model, loader, optimizer, criterion, device, scaler, use_amp, single_task=single_task)
         m = _compute_metrics(results)
 
         avg_loss = results["avg_loss"]
@@ -234,7 +250,7 @@ def train(
         )
 
         # Validation
-        val_results = eval_epoch(model, val_loader, criterion, device)
+        val_results = eval_epoch(model, val_loader, criterion, device, single_task=single_task)
         vm = _compute_metrics(val_results)
         val_loss = val_results["avg_loss"]
 
@@ -300,6 +316,8 @@ def main() -> None:
         help="Loss weight for duration head (default: 0.5)")
     parser.add_argument("--detach-dur", action="store_true",
         help="Detach duration loss from computation graph (ablation baseline)")
+    parser.add_argument("--single-task", action="store_true",
+        help="Train switch-only model without duration head (single-task ablation)")
     parser.add_argument("--weighted-loss", action="store_true",
         help="Use sqrt inverse-frequency class weights for the switch head loss")
     parser.add_argument("--sample-rate", type=float, default=0.2,
@@ -366,9 +384,15 @@ def main() -> None:
             sw_weight = _compute_sw_weights(train_entries, device) if args.weighted_loss else None
             if sw_weight is not None:
                 log_fn(f"[weighted-loss] sw_weight={sw_weight.tolist()}")
-            criterion = MultiTaskLoss(lambda_sw=args.lambda_sw, lambda_dur=args.lambda_dur, detach_dur=args.detach_dur, sw_weight=sw_weight)
 
-            model = DualHeadCausalModel(backbone_name=backbone_name).to(device)
+            if args.single_task:
+                criterion = nn.CrossEntropyLoss()
+                model = SingleHeadModel(backbone_name=backbone_name).to(device)
+                log_fn(f"[{model_name}] Mode: single-task (switch head only)")
+            else:
+                criterion = MultiTaskLoss(lambda_sw=args.lambda_sw, lambda_dur=args.lambda_dur, detach_dur=args.detach_dur, sw_weight=sw_weight)
+                model = DualHeadCausalModel(backbone_name=backbone_name).to(device)
+                log_fn(f"[{model_name}] Mode: multi-task (switch + duration heads)")
 
             # torch.compile: must come after .to(device) and before AdamW
             # if hasattr(torch, "compile"):
@@ -395,6 +419,7 @@ def main() -> None:
                 log_fn=log_fn,
                 use_amp=use_amp,
                 scaler=scaler,
+                single_task=args.single_task,
             )
 
             writer.close()
